@@ -132,6 +132,9 @@ func TestBuildEdgesFallbackPortName(t *testing.T) {
 	if edges[0].SrcPort != "if7" {
 		t.Errorf("SrcPort = %q, want \"if7\" (fallback to if{ifIndex})", edges[0].SrcPort)
 	}
+	if edges[0].SrcIfIndex != 7 {
+		t.Errorf("SrcIfIndex = %d, want 7", edges[0].SrcIfIndex)
+	}
 }
 
 // buildEdges: port in STP forwarding state produces an edge.

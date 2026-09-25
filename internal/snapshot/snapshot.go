@@ -71,7 +71,7 @@ const CurrentVersion = 3
 // internal/limits so the on-disk validator and the wire-format validator stay
 // in lockstep.
 const (
-	maxShortFieldBytes = 256 // vendor, model, OS version, site
+	maxShortFieldBytes = 256 // vendor, model, OS version, site, sys_name
 	maxProtoBytes      = 64  // enum-like values: discovery_proto, link_kind
 )
 
@@ -290,6 +290,9 @@ func validateSnapshotFields(f *File) error {
 		}
 		if n := len(d.Site); n > maxShortFieldBytes {
 			addErr("device[%d]: site exceeds %d bytes (%d)", i, maxShortFieldBytes, n)
+		}
+		if n := len(d.SysName); n > maxShortFieldBytes {
+			addErr("device[%d]: sys_name exceeds %d bytes (%d)", i, maxShortFieldBytes, n)
 		}
 		for k, v := range d.Labels {
 			if len(errs) >= maxValidationErrors {

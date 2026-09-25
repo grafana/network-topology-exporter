@@ -99,6 +99,16 @@ func edgeAttrs(edge discovery.Edge) []attribute.KeyValue {
 		attribute.String("adjacency", sanitizeUTF8(string(edge.Adjacency))),
 		attribute.String("precedence_rank", strconv.Itoa(edge.PrecedenceRank)),
 	}
+	// Omitted (not "0") when unresolved, same as vendor/model/os_version/site
+	// below: 0 is not a valid IF-MIB ifIndex, so emitting it as a string would
+	// read as real data. New in v2.0 — see
+	// docs/proposals/snmp-exporter-label-alignment.md §4.
+	if edge.SrcIfIndex != 0 {
+		attrs = append(attrs, attribute.String("src_if_index", strconv.Itoa(edge.SrcIfIndex)))
+	}
+	if edge.DstIfIndex != 0 {
+		attrs = append(attrs, attribute.String("dst_if_index", strconv.Itoa(edge.DstIfIndex)))
+	}
 	for k, v := range edge.Metadata {
 		attrs = append(attrs, attribute.String(metadataAttrPrefix+k, sanitizeUTF8(v)))
 	}
@@ -107,7 +117,13 @@ func edgeAttrs(edge discovery.Edge) []attribute.KeyValue {
 
 // deviceAttrs builds the OTLP attribute set for one device.
 func deviceAttrs(dev discovery.Device) []attribute.KeyValue {
-	attrs := []attribute.KeyValue{attribute.String("device", sanitizeUTF8(dev.ID))}
+	// "device_id", not "device": aligned with the Prometheus label name — see
+	// docs/proposals/snmp-exporter-label-alignment.md §5.1. This is a breaking
+	// rename; docs/otlp-schema.md's migration policy applies.
+	attrs := []attribute.KeyValue{attribute.String("device_id", sanitizeUTF8(dev.ID))}
+	if dev.SysName != "" {
+		attrs = append(attrs, attribute.String("sys_name", sanitizeUTF8(dev.SysName)))
+	}
 	if dev.Vendor != "" {
 		attrs = append(attrs, attribute.String("vendor", sanitizeUTF8(dev.Vendor)))
 	}

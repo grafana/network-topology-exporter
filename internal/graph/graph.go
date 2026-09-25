@@ -97,10 +97,11 @@ type Conflict struct {
 //  3. Select the edge with the lowest PrecedenceRank (1=highest priority).
 //     When multiple edges tie at the winning rank, prefer the one from the
 //     canonical (alphabetically-first) side so output is deterministic.
-//  4. Normalise the chosen edge's SrcDevice/SrcPort/DstDevice/DstPort to the
-//     canonical order. Port names are preserved from the winning observation
-//     (not from the normalised group key) so the emitted edge reflects the
-//     original encoding of the highest-precedence source.
+//  4. Normalise the chosen edge's SrcDevice/SrcPort/SrcIfIndex/DstDevice/
+//     DstPort/DstIfIndex to the canonical order. Port names and ifIndexes are
+//     preserved from the winning observation (not from the normalised group
+//     key) so the emitted edge reflects the original encoding of the
+//     highest-precedence source.
 //  5. Sort the result by EdgeKey so output order is deterministic across calls.
 func Reconcile(edges []discovery.Edge) ([]discovery.Edge, []Conflict) {
 	if len(edges) == 0 {
@@ -171,6 +172,7 @@ func Reconcile(edges []discovery.Edge) ([]discovery.Edge, []Conflict) {
 		if chosen.SrcDevice != k.SrcDevice {
 			chosen.SrcDevice, chosen.DstDevice = chosen.DstDevice, chosen.SrcDevice
 			chosen.SrcPort, chosen.DstPort = chosen.DstPort, chosen.SrcPort
+			chosen.SrcIfIndex, chosen.DstIfIndex = chosen.DstIfIndex, chosen.SrcIfIndex
 		}
 		if bidirectional {
 			chosen.Direction = discovery.DirectionBidirectional

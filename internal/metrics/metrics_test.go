@@ -20,9 +20,9 @@ func TestNewRegistersExpectedMetrics(t *testing.T) {
 	})
 
 	const want = `
-# HELP network_topology_device_info One series per discovered device. Value is always 1; inventory data is in the labels.
+# HELP network_topology_device_info One series per discovered device. Value is always 1; inventory data is in the labels. sys_name is the case-preserving sysName, added for joining against Alloy/snmp_exporter's own sysName label — see docs/proposals/snmp-exporter-label-alignment.md.
 # TYPE network_topology_device_info gauge
-network_topology_device_info{device_id="dev-1",model="C9300",os_version="17.6.4",site="lab",vendor="cisco"} 1
+network_topology_device_info{device_id="dev-1",model="C9300",os_version="17.6.4",site="lab",sys_name="",vendor="cisco"} 1
 `
 	if err := testutil.GatherAndCompare(m.Registry(), strings.NewReader(want), "network_topology_device_info"); err != nil {
 		t.Fatalf("metric mismatch: %v", err)

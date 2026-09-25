@@ -96,6 +96,16 @@ func TestValidateSpokePayload(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "negative src_if_index",
+			payload: SpokePayload{
+				Devices: []discovery.Device{validDevice},
+				Edges: []discovery.Edge{
+					{SrcDevice: "sw-1", SrcPort: "Gi0/1", SrcIfIndex: -1, DstDevice: "sw-2", DstPort: "Gi0/2"},
+				},
+			},
+			wantErr: true,
+		},
+		{
 			name: "overlong src_port",
 			payload: SpokePayload{
 				Devices: []discovery.Device{validDevice},
@@ -250,6 +260,13 @@ func TestValidateSpokePayloadRejectsLabelInjection(t *testing.T) {
 			name: "device vendor field with newline",
 			payload: SpokePayload{
 				Devices: []discovery.Device{{ID: "sw-1", Vendor: "Cisco\nrogue"}},
+			},
+			wantReason: rejectReasonInvalidLabelValue,
+		},
+		{
+			name: "device sys_name field with newline",
+			payload: SpokePayload{
+				Devices: []discovery.Device{{ID: "sw-1", SysName: "Sw-1\nrogue"}},
 			},
 			wantReason: rejectReasonInvalidLabelValue,
 		},

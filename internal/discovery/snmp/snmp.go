@@ -524,8 +524,16 @@ func Walk(ctx context.Context, p Params) (*discovery.Device, error) {
 	for _, pdu := range result.Variables {
 		switch pdu.Name {
 		case dotOIDSysName:
-			if s := NormaliseName(PDUString(pdu)); s != "" {
-				dev.ID = s
+			// Clean once, derive both forms from the one pass rather than
+			// running NormaliseName and NormaliseNamePreserveCase separately
+			// over the same raw value. dev.ID therefore lowercases after the
+			// 255-byte truncation rather than before it, unlike NormaliseName
+			// itself — only observable for a sysName within a few bytes of
+			// the cap whose case-folded form changes byte length, which real
+			// device hostnames don't.
+			if cleaned := NormaliseNamePreserveCase(PDUString(pdu)); cleaned != "" {
+				dev.SysName = cleaned
+				dev.ID = strings.ToLower(cleaned)
 				gotSysName = true
 			}
 		case dotOIDSysDescr:

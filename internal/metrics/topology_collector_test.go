@@ -51,6 +51,52 @@ network_topology_boundary_observation_info{peer_a="alpha-device",peer_b="zeta-de
 	}
 }
 
+// TestTopologyCollectorBoundaryObsCaseFold covers the case-fold fix: mixed-case
+// ReportingDevice/NeighbourHint values (as LLDP/CDP actually deliver them — see
+// docs/proposals/knowledge-graph-boundary-stitching.md §5) must be folded to
+// lowercase in the emitted metric, since PromQL has no lower() and a naive
+// Mimir recording rule matching this metric directly needs pre-folded values
+// to pair mixed-case fleets correctly. This is deliberately NOT the same as
+// asserting discovery.OutOfScopeNeighbour itself gets normalised — it doesn't
+// (see internal/federation's own collision-detection diagnostic, which needs
+// the raw value); only the Prometheus label values emitted here are folded.
+func TestTopologyCollectorBoundaryObsCaseFold(t *testing.T) {
+	m := New(true) // emitBoundaryObs=true
+
+	m.Topology.Update(discovery.Graph{
+		OutOfScope: []discovery.OutOfScopeNeighbour{
+			{
+				ReportingDevice: "Alpha-Device", // already lowercase in practice (dev.ID), but fold regardless
+				ReportingPort:   "Gi0/1",
+				NeighbourHint:   "ZETA-DEVICE", // raw LLDP/CDP-decoded case — never folded upstream
+				Proto:           "lldp",
+			},
+		},
+	})
+
+	const want = `
+# HELP network_topology_boundary_observation_info Federation uncoordinated mode: one series per out-of-scope boundary observation. peer_a is always the alphabetically-smaller endpoint. A Mimir recording rule fires count by(peer_a,peer_b,proto)(...)==2 for confirmed cross-boundary edges.
+# TYPE network_topology_boundary_observation_info gauge
+network_topology_boundary_observation_info{peer_a="alpha-device",peer_b="zeta-device",proto="lldp",reporting_device="alpha-device",src_port="Gi0/1"} 1
+`
+	if err := testutil.GatherAndCompare(m.Registry(), strings.NewReader(want), "network_topology_boundary_observation_info"); err != nil {
+		t.Fatalf("boundary obs case-fold mismatch: %v", err)
+	}
+
+	// The underlying graph snapshot itself must stay raw/unfolded — federation's
+	// hub_merge.go collision-detection diagnostic depends on seeing the actual
+	// walker-decoded value, not a pre-folded one.
+	g := m.Topology.CurrentGraph()
+	if g.OutOfScope[0].NeighbourHint != "ZETA-DEVICE" {
+		t.Errorf("NeighbourHint mutated in the graph snapshot: got %q, want unchanged %q",
+			g.OutOfScope[0].NeighbourHint, "ZETA-DEVICE")
+	}
+	if g.OutOfScope[0].ReportingDevice != "Alpha-Device" {
+		t.Errorf("ReportingDevice mutated in the graph snapshot: got %q, want unchanged %q",
+			g.OutOfScope[0].ReportingDevice, "Alpha-Device")
+	}
+}
+
 // TestTopologyCollectorCanonicalPairSwap directly exercises canonicalPair since
 // the test file is in package metrics (white-box).
 func TestTopologyCollectorCanonicalPairSwap(t *testing.T) {
@@ -161,19 +207,36 @@ func TestTopologyCollectorEdgeMetric(t *testing.T) {
 			{
 				SrcDevice:      "dev-a",
 				SrcPort:        "Gi0/1",
+				SrcIfIndex:     101,
 				DstDevice:      "dev-b",
 				DstPort:        "Gi0/2",
 				DiscoveryProto: "lldp",
 				LinkKind:       "ethernet",
 				Direction:      discovery.DirectionBidirectional,
 			},
+			{
+				// BGP never resolves an ifIndex or a port on either side —
+				// alongside the LLDP edge above, this covers a scrape with
+				// both an ifIndex-bearing and a never-resolves-one edge in
+				// the same Collect call.
+				SrcDevice:      "dev-c",
+				DstDevice:      "192.0.2.1",
+				DiscoveryProto: "bgp",
+				LinkKind:       "ip",
+				Direction:      discovery.DirectionUnidirectional,
+			},
 		},
 	})
 
+	// SrcIfIndex is set (LLDP always resolves the local side); DstIfIndex is
+	// left zero, exercising ifIndexLabel's empty-label branch — LLDP never
+	// resolves the remote side's ifIndex, so dst_if_index="" is the common case
+	// in practice, not just a test default.
 	const want = `
-# HELP network_topology_edge_info One series per discovered topology edge. Value is always 1.
+# HELP network_topology_edge_info One series per discovered topology edge. Value is always 1. src_if_index/dst_if_index carry the IF-MIB ifIndex for each endpoint when the discovery protocol resolves one (empty otherwise) — the join key against snmp_exporter's ifIndex-keyed if_mib rows.
 # TYPE network_topology_edge_info gauge
-network_topology_edge_info{direction="bidirectional",discovery_proto="lldp",dst_device="dev-b",dst_port="Gi0/2",link_kind="ethernet",src_device="dev-a",src_port="Gi0/1"} 1
+network_topology_edge_info{direction="bidirectional",discovery_proto="lldp",dst_device="dev-b",dst_if_index="",dst_port="Gi0/2",link_kind="ethernet",src_device="dev-a",src_if_index="101",src_port="Gi0/1"} 1
+network_topology_edge_info{direction="unidirectional",discovery_proto="bgp",dst_device="192.0.2.1",dst_if_index="",dst_port="",link_kind="ip",src_device="dev-c",src_if_index="",src_port=""} 1
 `
 	if err := testutil.GatherAndCompare(m.Registry(), strings.NewReader(want), "network_topology_edge_info"); err != nil {
 		t.Fatalf("edge metric mismatch: %v", err)

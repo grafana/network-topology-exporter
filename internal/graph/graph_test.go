@@ -264,17 +264,26 @@ func TestReconcilePrecedenceRank(t *testing.T) {
 func TestReconcileCanonicalOrder(t *testing.T) {
 	// "b" < "a" alphabetically so the canonical key has b as SrcDevice.
 	e := discovery.Edge{
-		SrcDevice: "z-device", SrcPort: "Gi1",
-		DstDevice: "a-device", DstPort: "Gi2",
+		SrcDevice: "z-device", SrcPort: "Gi1", SrcIfIndex: 11,
+		DstDevice: "a-device", DstPort: "Gi2", DstIfIndex: 22,
 		DiscoveryProto: "lldp", PrecedenceRank: 2,
 	}
 	edges, _ := Reconcile([]discovery.Edge{e})
 	if len(edges) != 1 {
 		t.Fatalf("expected 1 edge, got %d", len(edges))
 	}
-	// Canonical order: a-device < z-device → a-device is SrcDevice.
-	if edges[0].SrcDevice != "a-device" {
-		t.Errorf("SrcDevice = %q, want a-device (canonical order)", edges[0].SrcDevice)
+	// Canonical order: a-device < z-device → a-device is SrcDevice, and
+	// SrcPort/SrcIfIndex must move WITH it — a bug here silently attaches an
+	// ifIndex to the wrong device, which is worse than the field not
+	// existing (it produces a confidently wrong join against snmp_exporter).
+	got := edges[0]
+	if got.SrcDevice != "a-device" || got.SrcPort != "Gi2" || got.SrcIfIndex != 22 {
+		t.Errorf("src side = {%q,%q,%d}, want {a-device,Gi2,22} (canonical order, port+ifIndex follow device)",
+			got.SrcDevice, got.SrcPort, got.SrcIfIndex)
+	}
+	if got.DstDevice != "z-device" || got.DstPort != "Gi1" || got.DstIfIndex != 11 {
+		t.Errorf("dst side = {%q,%q,%d}, want {z-device,Gi1,11}",
+			got.DstDevice, got.DstPort, got.DstIfIndex)
 	}
 }
 

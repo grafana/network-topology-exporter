@@ -6,6 +6,56 @@ All notable changes are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- `sys_name` label/attribute on `network_topology_device_info` and OTLP device
+  metrics — the case-preserving sysName, alongside the existing lowercased
+  `device_id`. Joins against Alloy/`prometheus.exporter.snmp`'s own
+  case-sensitive `sysName` label. (issue #227)
+- `src_if_index`/`dst_if_index` labels/attributes on `network_topology_edge_info`
+  and OTLP edge metrics — the IF-MIB ifIndex for each endpoint, when the
+  discovery protocol resolves one. Joins against snmp_exporter's
+  ifIndex-keyed `if_mib` rows. (issue #227)
+
+### Changed
+
+- **Breaking:** OTLP device attribute renamed `device` → `device_id`, to match
+  the Prometheus label name. (issue #227)
+- Federation uncoordinated mode's `network_topology_boundary_observation_info`
+  now case-folds `peer_a`/`peer_b`/`reporting_device` at emission — fixes
+  mixed-case fleets being unmatchable by a hand-written PromQL/Mimir recording
+  rule (PromQL has no `lower()`). The underlying graph snapshot and federation
+  wire payload are unaffected; hub mode's own matching and collision-detection
+  diagnostic are unchanged. (issue #227)
+
+### Fixed
+
+- `docs/architecture.md` LD-15/LD-19: corrected two claims that overstated
+  implemented behavior — LD-15 described a NormaliseName + chassis-ID/IP
+  fallback chain for the boundary-observation neighbour hint that doesn't
+  exist; LD-19 described `known_inter_domain_links` as consumed by both hub
+  mode and the uncoordinated recording rule, but only hub mode actually
+  applies it. (See `docs/proposals/snmp-exporter-label-alignment.md` for the
+  full design rationale and migration notes.)
+- `graph.Reconcile`'s canonical-order normalisation now swaps `SrcIfIndex`/
+  `DstIfIndex` along with `SrcDevice`/`SrcPort`/`DstDevice`/`DstPort` — without
+  this, roughly half of all edges would land the wrong device's ifIndex on the
+  wrong side after reconciliation.
+- Added `sys_name` to the field checks `internal/federation/hub_validate.go`
+  and `internal/snapshot/snapshot.go` already run on `vendor`/`model`/
+  `os_version`/`site` — it had the same UTF-8/length exposure as those fields
+  but was missing from both checks.
+- `internal/federation/hub_validate.go` now rejects a spoke payload edge with
+  a negative `src_if_index`/`dst_if_index` — the two new int fields had no
+  validation at all.
+
+### Internal
+
+- `internal/discovery/isis`: replaced two parallel maps
+  (`circIfNames`/`circIfIndexes`) with a single `map[string]circuitIf`, since
+  they were always populated and looked up together.
+rationale and migration notes.
+
 ## [1.0.0] - 2026-06-18
 
 Initial release under the [Grafana](https://github.com/grafana) organization.

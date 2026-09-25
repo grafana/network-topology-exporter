@@ -168,6 +168,9 @@ func TestBuildEdgesFallbackIfIndex(t *testing.T) {
 	if edges[0].SrcPort != "if7" {
 		t.Errorf("SrcPort = %q, want \"if7\"", edges[0].SrcPort)
 	}
+	if edges[0].SrcIfIndex != 7 {
+		t.Errorf("SrcIfIndex = %d, want 7", edges[0].SrcIfIndex)
+	}
 }
 
 // TestBuildEdgesIfNameFallback verifies that when ifNames is empty, the local
@@ -183,6 +186,9 @@ func TestBuildEdgesIfNameFallback(t *testing.T) {
 	}
 	if edges[0].SrcPort != "if3" {
 		t.Errorf("SrcPort = %q, want \"if3\"", edges[0].SrcPort)
+	}
+	if edges[0].SrcIfIndex != 3 {
+		t.Errorf("SrcIfIndex = %d, want 3", edges[0].SrcIfIndex)
 	}
 }
 

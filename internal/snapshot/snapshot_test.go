@@ -104,9 +104,9 @@ func TestLoadMissingFileReturnsNil(t *testing.T) {
 func TestWriteLoadRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "snap.json")
 	in := File{
-		Devices: []discovery.Device{{ID: "dev-1", Vendor: "cisco", Site: "lab"}},
+		Devices: []discovery.Device{{ID: "dev-1", SysName: "Dev-1", Vendor: "cisco", Site: "lab"}},
 		Edges: []discovery.Edge{{
-			SrcDevice: "dev-1", SrcPort: "Gi0/1",
+			SrcDevice: "dev-1", SrcPort: "Gi0/1", SrcIfIndex: 7,
 			DstDevice: "dev-2", DstPort: "Gi0/2",
 			DiscoveryProto: "lldp",
 			Direction:      discovery.DirectionBidirectional,
@@ -132,10 +132,10 @@ func TestWriteLoadRoundTrip(t *testing.T) {
 	if out.Version != CurrentVersion {
 		t.Errorf("Version = %d, want %d", out.Version, CurrentVersion)
 	}
-	if len(out.Devices) != 1 || out.Devices[0].ID != "dev-1" {
+	if len(out.Devices) != 1 || out.Devices[0].ID != "dev-1" || out.Devices[0].SysName != "Dev-1" {
 		t.Errorf("Devices round-trip mismatch: %#v", out.Devices)
 	}
-	if len(out.Edges) != 1 || out.Edges[0].PrecedenceRank != 2 {
+	if len(out.Edges) != 1 || out.Edges[0].PrecedenceRank != 2 || out.Edges[0].SrcIfIndex != 7 {
 		t.Errorf("Edges round-trip mismatch: %#v", out.Edges)
 	}
 	if out.CredentialCache["dev-1"] != "core-v3" {
@@ -917,9 +917,9 @@ func TestLoadAcceptsBoundaryValues(t *testing.T) {
 func TestValidateSnapshotFieldsAccumulatesMultipleErrors(t *testing.T) {
 	f := &File{
 		Devices: []discovery.Device{
-			{ID: strings.Repeat("a", 1024)},                   // device[0]: id
-			{ID: "ok", Vendor: strings.Repeat("v", 1024)},     // device[1]: vendor
-			{ID: "ok2", OSVersion: strings.Repeat("o", 1024)}, // device[2]: os_version
+			{ID: strings.Repeat("a", 1024)}, // device[0]: id
+			{ID: "ok", Vendor: strings.Repeat("v", 1024), SysName: strings.Repeat("s", 1024)}, // device[1]: vendor, sys_name
+			{ID: "ok2", OSVersion: strings.Repeat("o", 1024)},                                 // device[2]: os_version
 		},
 		Edges: []discovery.Edge{
 			{SrcDevice: "a", SrcPort: strings.Repeat("p", 1024), DstDevice: "b", DstPort: "ok"},                                                   // edge[0]: src_port
@@ -940,6 +940,7 @@ func TestValidateSnapshotFieldsAccumulatesMultipleErrors(t *testing.T) {
 	wantSubstrings := []string{
 		"device[0]", "id exceeds",
 		"device[1]", "vendor exceeds",
+		"device[1]", "sys_name exceeds",
 		"device[2]", "os_version exceeds",
 		"edge[0]", "src_port exceeds",
 		"edge[1]", "dst_port exceeds",
