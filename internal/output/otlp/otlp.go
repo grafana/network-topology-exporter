@@ -101,7 +101,7 @@ func edgeAttrs(edge discovery.Edge) []attribute.KeyValue {
 	}
 	// Omitted (not "0") when unresolved, same as vendor/model/os_version/site
 	// below: 0 is not a valid IF-MIB ifIndex, so emitting it as a string would
-	// read as real data. New in v2.0 — see
+	// read as real data. New in v1.1 (OTLP schema — docs/otlp-schema.md) — see
 	// docs/proposals/snmp-exporter-label-alignment.md §4.
 	if edge.SrcIfIndex != 0 {
 		attrs = append(attrs, attribute.String("src_if_index", strconv.Itoa(edge.SrcIfIndex)))
@@ -117,10 +117,21 @@ func edgeAttrs(edge discovery.Edge) []attribute.KeyValue {
 
 // deviceAttrs builds the OTLP attribute set for one device.
 func deviceAttrs(dev discovery.Device) []attribute.KeyValue {
-	// "device_id", not "device": aligned with the Prometheus label name — see
-	// docs/proposals/snmp-exporter-label-alignment.md §5.1. This is a breaking
-	// rename; docs/otlp-schema.md's migration policy applies.
-	attrs := []attribute.KeyValue{attribute.String("device_id", sanitizeUTF8(dev.ID))}
+	// "device_id" is the aligned name — matches the Prometheus label name,
+	// see docs/proposals/snmp-exporter-label-alignment.md §5.1.
+	//
+	// "device" is DEPRECATED as of this release: it is emitted alongside
+	// "device_id" (same value) only for one release's overlap window so
+	// existing OTLP consumers built against the pre-#227 schema keep working
+	// unchanged while they migrate. Per docs/operator/stability.md's
+	// deprecation policy (minimum one full minor release of overlap), do not
+	// remove this attribute in this release — it is scheduled for removal in
+	// the next MAJOR version, per docs/otlp-schema.md's versioning policy.
+	// See CHANGELOG.md's "Deprecated" entry for this release.
+	attrs := []attribute.KeyValue{
+		attribute.String("device_id", sanitizeUTF8(dev.ID)),
+		attribute.String("device", sanitizeUTF8(dev.ID)),
+	}
 	if dev.SysName != "" {
 		attrs = append(attrs, attribute.String("sys_name", sanitizeUTF8(dev.SysName)))
 	}

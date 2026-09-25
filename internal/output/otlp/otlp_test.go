@@ -344,6 +344,35 @@ func TestPushGraphDeviceAttributes(t *testing.T) {
 	}
 }
 
+// TestPushGraphDeviceAttributesDualEmitsDeprecatedDevice locks in the
+// deprecation-window dual-emit behaviour: the deprecated "device" attribute
+// must still be emitted, with the same value as "device_id", for at least
+// one full release per docs/operator/stability.md's deprecation policy.
+// Removing this without a matching CHANGELOG "Removed" entry and a major
+// version bump would silently break any consumer still reading "device".
+func TestPushGraphDeviceAttributesDualEmitsDeprecatedDevice(t *testing.T) {
+	exp, reader, _ := newTestExporter("")
+
+	g := discovery.Graph{
+		Devices: []discovery.Device{{ID: "rtr-1"}},
+	}
+	if err := exp.PushGraph(context.Background(), g); err != nil {
+		t.Fatalf("PushGraph: %v", err)
+	}
+
+	devicePoints := collectMetrics(t, reader)["network_topology_device_info"]
+	if len(devicePoints) != 1 {
+		t.Fatalf("expected 1 device data point, got %d", len(devicePoints))
+	}
+	pt := devicePoints[0]
+	if pt["device"] != "rtr-1" {
+		t.Errorf(`deprecated "device" attribute = %q, want %q`, pt["device"], "rtr-1")
+	}
+	if pt["device_id"] != "rtr-1" {
+		t.Errorf(`"device_id" attribute = %q, want %q`, pt["device_id"], "rtr-1")
+	}
+}
+
 func TestPushGraphDeviceAttributesOmitEmpty(t *testing.T) {
 	exp, reader, _ := newTestExporter("")
 

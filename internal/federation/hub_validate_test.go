@@ -106,6 +106,52 @@ func TestValidateSpokePayload(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			// Covers the right-hand side of the SrcIfIndex/DstIfIndex ||
+			// condition in hub_validate.go: "negative src_if_index" above only
+			// ever sets SrcIfIndex, so without this case DstIfIndex < 0 was
+			// never exercised by any test.
+			name: "negative dst_if_index",
+			payload: SpokePayload{
+				Devices: []discovery.Device{validDevice},
+				Edges: []discovery.Edge{
+					{SrcDevice: "sw-1", SrcPort: "Gi0/1", DstDevice: "sw-2", DstPort: "Gi0/2", DstIfIndex: -1},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "src_if_index exceeds MaxIfIndex",
+			payload: SpokePayload{
+				Devices: []discovery.Device{validDevice},
+				Edges: []discovery.Edge{
+					{SrcDevice: "sw-1", SrcPort: "Gi0/1", SrcIfIndex: limits.MaxIfIndex + 1, DstDevice: "sw-2", DstPort: "Gi0/2"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			// Mirrors "src_if_index exceeds MaxIfIndex" for DstIfIndex, so the
+			// upper-bound half of the || condition is covered on both sides too.
+			name: "dst_if_index exceeds MaxIfIndex",
+			payload: SpokePayload{
+				Devices: []discovery.Device{validDevice},
+				Edges: []discovery.Edge{
+					{SrcDevice: "sw-1", SrcPort: "Gi0/1", DstDevice: "sw-2", DstPort: "Gi0/2", DstIfIndex: limits.MaxIfIndex + 1},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "src_if_index and dst_if_index at MaxIfIndex boundary (accepted)",
+			payload: SpokePayload{
+				Devices: []discovery.Device{validDevice},
+				Edges: []discovery.Edge{
+					{SrcDevice: "sw-1", SrcPort: "Gi0/1", SrcIfIndex: limits.MaxIfIndex, DstDevice: "sw-2", DstPort: "Gi0/2", DstIfIndex: limits.MaxIfIndex},
+				},
+			},
+			wantErr: false,
+		},
+		{
 			name: "overlong src_port",
 			payload: SpokePayload{
 				Devices: []discovery.Device{validDevice},

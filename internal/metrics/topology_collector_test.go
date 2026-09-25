@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/grafana/network-topology-exporter/internal/discovery"
+	"github.com/grafana/network-topology-exporter/internal/limits"
 )
 
 // TestTopologyCollectorBoundaryObsEmission covers the emitBoundaryObs=true path
@@ -240,6 +242,71 @@ network_topology_edge_info{direction="unidirectional",discovery_proto="bgp",dst_
 `
 	if err := testutil.GatherAndCompare(m.Registry(), strings.NewReader(want), "network_topology_edge_info"); err != nil {
 		t.Fatalf("edge metric mismatch: %v", err)
+	}
+}
+
+// TestTopologyCollectorEdgeMetricRejectsOutOfRangeIfIndex is the
+// Collect()-level counterpart to TestIfIndexLabel: a negative or
+// over-limits.MaxIfIndex value reaching Collect (e.g. from a discovery
+// walker bug) must degrade to the same empty label ifIndexLabel(0) produces,
+// never a literal negative or out-of-range number on the wire.
+func TestTopologyCollectorEdgeMetricRejectsOutOfRangeIfIndex(t *testing.T) {
+	m := New(false)
+
+	m.Topology.Update(discovery.Graph{
+		Edges: []discovery.Edge{
+			{
+				SrcDevice:      "dev-a",
+				SrcPort:        "Gi0/1",
+				SrcIfIndex:     -1,
+				DstDevice:      "dev-b",
+				DstPort:        "Gi0/2",
+				DstIfIndex:     limits.MaxIfIndex + 1,
+				DiscoveryProto: "lldp",
+				LinkKind:       "ethernet",
+				Direction:      discovery.DirectionBidirectional,
+			},
+		},
+	})
+
+	want := `
+# HELP network_topology_edge_info One series per discovered topology edge. Value is always 1. src_if_index/dst_if_index carry the IF-MIB ifIndex for each endpoint when the discovery protocol resolves one (empty otherwise) — the join key against snmp_exporter's ifIndex-keyed if_mib rows.
+# TYPE network_topology_edge_info gauge
+network_topology_edge_info{direction="bidirectional",discovery_proto="lldp",dst_device="dev-b",dst_if_index="",dst_port="Gi0/2",link_kind="ethernet",src_device="dev-a",src_if_index="",src_port="Gi0/1"} 1
+`
+	if err := testutil.GatherAndCompare(m.Registry(), strings.NewReader(want), "network_topology_edge_info"); err != nil {
+		t.Fatalf("edge metric mismatch: %v", err)
+	}
+}
+
+// TestIfIndexLabel covers ifIndexLabel directly. Previously only idx==101
+// (a normal resolved value) and idx==0 (the unresolved sentinel) were
+// exercised, via TestTopologyCollectorEdgeMetric's Collect() call — the
+// negative and over-limits.MaxIfIndex cases were never tested on this
+// default single-instance path, unlike the equivalent federation hub-ingest
+// validator (internal/federation/hub_validate.go), which does check them.
+// Collect() can't return an error (it implements prometheus.Collector), so
+// out-of-range values degrade to the same "" the unresolved sentinel gets,
+// rather than being stringified verbatim into a Prometheus label.
+func TestIfIndexLabel(t *testing.T) {
+	cases := []struct {
+		name string
+		idx  int
+		want string
+	}{
+		{"zero (unresolved sentinel)", 0, ""},
+		{"typical resolved value", 101, "101"},
+		{"negative", -1, ""},
+		{"large negative", -101, ""},
+		{"at MaxIfIndex boundary", limits.MaxIfIndex, strconv.Itoa(limits.MaxIfIndex)},
+		{"one past MaxIfIndex", limits.MaxIfIndex + 1, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ifIndexLabel(tc.idx); got != tc.want {
+				t.Errorf("ifIndexLabel(%d) = %q, want %q", tc.idx, got, tc.want)
+			}
+		})
 	}
 }
 

@@ -191,9 +191,11 @@ func validateSpokePayload(p SpokePayload) error {
 			return newValidationError(rejectReasonStructuralInvalid,
 				"edge[%d]: self-edge (src_device == dst_device == %q)", i, e.SrcDevice)
 		}
-		if e.SrcIfIndex < 0 || e.DstIfIndex < 0 {
+		if e.SrcIfIndex < 0 || e.SrcIfIndex > limits.MaxIfIndex ||
+			e.DstIfIndex < 0 || e.DstIfIndex > limits.MaxIfIndex {
 			return newValidationError(rejectReasonStructuralInvalid,
-				"edge[%d]: src_if_index/dst_if_index must not be negative (got %d/%d)", i, e.SrcIfIndex, e.DstIfIndex)
+				"edge[%d]: src_if_index/dst_if_index must be non-negative and at most %d (got %d/%d)",
+				i, limits.MaxIfIndex, e.SrcIfIndex, e.DstIfIndex)
 		}
 		for _, f := range []struct{ name, val string }{
 			{"src_device", e.SrcDevice}, {"src_port", e.SrcPort},

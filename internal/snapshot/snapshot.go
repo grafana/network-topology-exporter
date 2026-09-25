@@ -322,6 +322,20 @@ func validateSnapshotFields(f *File) error {
 		if n := len(e.DstPort); n > limits.MaxPortNameBytes {
 			addErr("edge[%d]: dst_port exceeds %d bytes (%d)", i, limits.MaxPortNameBytes, n)
 		}
+		// SrcIfIndex/DstIfIndex: same non-negative + limits.MaxIfIndex bound as
+		// the federation hub-ingest validator (internal/federation/hub_validate.go)
+		// and the default single-instance Collect path
+		// (internal/metrics/topology_collector.go's ifIndexLabel). A snapshot is
+		// untrusted input too — written by a possibly-older or -corrupted
+		// process, or a disk with bit rot — so this loader re-checks the field
+		// independently rather than trusting that whatever wrote it already
+		// validated.
+		if e.SrcIfIndex < 0 || e.SrcIfIndex > limits.MaxIfIndex {
+			addErr("edge[%d]: src_if_index must be non-negative and at most %d (%d)", i, limits.MaxIfIndex, e.SrcIfIndex)
+		}
+		if e.DstIfIndex < 0 || e.DstIfIndex > limits.MaxIfIndex {
+			addErr("edge[%d]: dst_if_index must be non-negative and at most %d (%d)", i, limits.MaxIfIndex, e.DstIfIndex)
+		}
 		if n := len(e.DiscoveryProto); n > maxProtoBytes {
 			addErr("edge[%d]: discovery_proto exceeds %d bytes (%d)", i, maxProtoBytes, n)
 		}

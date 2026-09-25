@@ -10,6 +10,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/grafana/network-topology-exporter/internal/discovery"
+	"github.com/grafana/network-topology-exporter/internal/limits"
 	"github.com/grafana/network-topology-exporter/internal/sanitize"
 )
 
@@ -18,8 +19,21 @@ const maxLabelLen = 128
 // ifIndexLabel stringifies an ifIndex for a label value, or returns "" for
 // the unresolved case (0) — mirrors how SrcPort/DstPort already degrade to
 // empty. See docs/proposals/snmp-exporter-label-alignment.md §4.
+//
+// This is the default single-instance path: discovery.Edge.SrcIfIndex/
+// DstIfIndex arrive here straight from the local LLDP/CDP/FDB/ISIS walkers
+// (internal/discovery/...), not through the federation hub-ingest
+// validator (internal/federation/hub_validate.go), which only runs for
+// pushed spoke payloads. Collect cannot return an error — it implements
+// prometheus.Collector — so a value a well-behaved walker should never
+// produce (negative, or absurdly large) is degraded to the same ""
+// "unresolved" label a real never-resolves case gets, rather than being
+// stringified verbatim into a Prometheus label or panicking the scrape.
+// limits.MaxIfIndex is the same bound the hub-ingest and snapshot-load
+// paths enforce (internal/limits), so all three ifIndex validation sites
+// agree on what "in range" means.
 func ifIndexLabel(idx int) string {
-	if idx == 0 {
+	if idx <= 0 || idx > limits.MaxIfIndex {
 		return ""
 	}
 	return strconv.Itoa(idx)

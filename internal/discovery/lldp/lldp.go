@@ -382,8 +382,24 @@ func buildEdges(ctx context.Context, localDevice string, locPorts map[int]locPor
 		}
 
 		edges = append(edges, discovery.Edge{
-			SrcDevice:      localDevice,
-			SrcPort:        localPort,
+			SrcDevice: localDevice,
+			SrcPort:   localPort,
+			// k.portNum is lldpLocPortNum (LLDP-MIB / IEEE 802.1AB), used here
+			// as-if it were the IF-MIB ifIndex for the join key against
+			// snmp_exporter's ifIndex-keyed if_mib rows (see
+			// docs/proposals/snmp-exporter-label-alignment.md). 802.1AB only
+			// RECOMMENDS this equivalence — clause 9.5.5.2/lldpLocPortNum says
+			// that when the local interface also has an ifTable entry "this
+			// number should have the same value as ifIndex" — it is not a
+			// MIB-enforced guarantee. Nothing stops an agent implementation
+			// from assigning lldpLocPortNum independently of ifIndex (e.g. its
+			// own port-table ordering), and this codebase has not yet
+			// validated the equivalence against a real multi-vendor fleet.
+			// Treat that validation as outstanding before trusting
+			// src_if_index/dst_if_index sourced from LLDP as an authoritative
+			// join key for dashboards or alerts — an unnoticed mismatch here
+			// would silently join a topology edge to the wrong SNMP interface
+			// row rather than failing loudly.
 			SrcIfIndex:     k.portNum,
 			DstDevice:      remDevice,
 			DstPort:        remPort,

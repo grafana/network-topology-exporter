@@ -22,4 +22,7 @@ func TestLimitsValuesArePinned(t *testing.T) {
 	if MaxLabelValueBytes != 4096 {
 		t.Errorf("MaxLabelValueBytes = %d, want 4096", MaxLabelValueBytes)
 	}
+	if MaxIfIndex != 2147483647 {
+		t.Errorf("MaxIfIndex = %d, want 2147483647", MaxIfIndex)
+	}
 }

@@ -1,6 +1,6 @@
 # OTLP Payload Schema
 
-Version: 2.0 (pending release — breaking rename below; last stable at 1.0, v1.0.0)
+Version: 1.1 (pending release — additive only; last stable at 1.0, v1.0.0). `device` is deprecated (see below) but still emitted, so this is not a breaking version bump.
 Semantic conventions: OpenTelemetry semconv v1.26.0 (the version the exporter is built against). Note: the exporter does not set a resource Schema URL on the wire, so emitted payloads carry no `schema_url` field.
 
 ## Resource attributes
@@ -19,7 +19,7 @@ One gauge data point per edge, value `1.0`. Attributes:
 |---|---|---|
 | `src_device` | string | Source device sysName |
 | `src_port` | string | Source interface name (empty if unknown) |
-| `src_if_index` | string | Source IF-MIB ifIndex (stringified). Omitted, not `"0"`, when unresolved — new in v2.0, see docs/proposals/snmp-exporter-label-alignment.md §4. |
+| `src_if_index` | string | Source IF-MIB ifIndex (stringified). Omitted, not `"0"`, when unresolved — new in v1.1, see docs/proposals/snmp-exporter-label-alignment.md §4. |
 | `dst_device` | string | Destination device sysName or IP |
 | `dst_port` | string | Destination interface name (empty if unknown) |
 | `dst_if_index` | string | Destination IF-MIB ifIndex (stringified). Omitted when unresolved — same as `src_if_index`. |
@@ -37,8 +37,9 @@ One gauge data point per device, value `1.0`. Attributes:
 
 | Attribute | Type | Description |
 |---|---|---|
-| `device_id` | string | Device sysName (lowercased) or management IP. **Breaking rename (issue #227, v2.0):** was `device` in schema 1.0 — renamed to match the Prometheus `device_id` label; no rationale was on record for the two outputs using different key names. Consumers reading the `device` attribute must migrate to `device_id`. |
-| `sys_name` | string | Device sysName, case-preserving (omitted when empty). New in v2.0 — the join key against Alloy/`prometheus.exporter.snmp`'s own `sysName` label, which is case-sensitive and cannot be matched against the lowercased `device_id`. See docs/proposals/snmp-exporter-label-alignment.md. |
+| `device_id` | string | Device sysName (lowercased) or management IP. New in v1.1 (issue #227) — matches the Prometheus `device_id` label name; no rationale was on record for `device` and the Prometheus label using different key names. Same value as the deprecated `device` attribute below. |
+| `device` | string | **Deprecated (issue #227, v1.1).** Same value as `device_id`; kept only for one release's overlap window so consumers reading `device` keep working while they migrate to `device_id`. Emitted alongside `device_id`, not replaced by it, in this release. Scheduled for removal in the next major version — migrate to `device_id` now. |
+| `sys_name` | string | Device sysName, case-preserving (omitted when empty). New in v1.1 — the join key against Alloy/`prometheus.exporter.snmp`'s own `sysName` label, which is case-sensitive and cannot be matched against the lowercased `device_id`. See docs/proposals/snmp-exporter-label-alignment.md. |
 | `vendor` | string | Vendor name (omitted when empty) |
 | `model` | string | Hardware model (omitted when empty) |
 | `os_version` | string | OS version string (omitted when empty) |
