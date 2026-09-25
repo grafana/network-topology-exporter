@@ -13,6 +13,7 @@ import (
 
 	"github.com/grafana/network-topology-exporter/internal/discovery"
 	"github.com/grafana/network-topology-exporter/internal/graph"
+	"github.com/grafana/network-topology-exporter/internal/limits"
 	"github.com/grafana/network-topology-exporter/internal/otelx"
 )
 
@@ -312,6 +313,40 @@ func TestPushGraphEdgeAttributes(t *testing.T) {
 	}
 	if _, ok := pt["dst_if_index"]; ok {
 		t.Errorf("dst_if_index present with value %q, want omitted (unresolved, DstIfIndex==0)", pt["dst_if_index"])
+	}
+}
+
+func TestPushGraphEdgeRejectsOutOfRangeIfIndex(t *testing.T) {
+	exp, reader, _ := newTestExporter("")
+
+	g := discovery.Graph{
+		Edges: []discovery.Edge{
+			{
+				SrcDevice: "sw-a", SrcPort: "Gi0/1", SrcIfIndex: -1,
+				DstDevice: "sw-b", DstPort: "Gi0/2", DstIfIndex: limits.MaxIfIndex + 1,
+				DiscoveryProto: "lldp", LinkKind: "ethernet",
+				Direction:      discovery.DirectionBidirectional,
+				Confidence:     discovery.ConfidenceHigh,
+				Adjacency:      discovery.AdjacencyDirect,
+				PrecedenceRank: 1,
+			},
+		},
+	}
+
+	if err := exp.PushGraph(context.Background(), g); err != nil {
+		t.Fatalf("PushGraph: %v", err)
+	}
+
+	edgePoints := collectMetrics(t, reader)["network_topology_edge_info"]
+	if len(edgePoints) != 1 {
+		t.Fatalf("expected 1 edge data point, got %d", len(edgePoints))
+	}
+	pt := edgePoints[0]
+	if v, ok := pt["src_if_index"]; ok {
+		t.Errorf("src_if_index present with value %q for negative SrcIfIndex, want omitted", v)
+	}
+	if v, ok := pt["dst_if_index"]; ok {
+		t.Errorf("dst_if_index present with value %q for DstIfIndex > limits.MaxIfIndex, want omitted", v)
 	}
 }
 

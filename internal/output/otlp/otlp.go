@@ -34,6 +34,7 @@ import (
 
 	"github.com/grafana/network-topology-exporter/internal/discovery"
 	"github.com/grafana/network-topology-exporter/internal/graph"
+	"github.com/grafana/network-topology-exporter/internal/limits"
 	"github.com/grafana/network-topology-exporter/internal/metrics"
 	"github.com/grafana/network-topology-exporter/internal/otelx"
 )
@@ -102,11 +103,15 @@ func edgeAttrs(edge discovery.Edge) []attribute.KeyValue {
 	// Omitted (not "0") when unresolved, same as vendor/model/os_version/site
 	// below: 0 is not a valid IF-MIB ifIndex, so emitting it as a string would
 	// read as real data. New in v1.1 (OTLP schema — docs/otlp-schema.md) — see
-	// docs/proposals/snmp-exporter-label-alignment.md §4.
-	if edge.SrcIfIndex != 0 {
+	// docs/proposals/snmp-exporter-label-alignment.md §4. Also rejects a value
+	// outside IF-MIB's valid range (internal/limits.MaxIfIndex), mirroring the
+	// guard in internal/metrics/topology_collector.go's ifIndexLabel — this
+	// path reads the same discovery.Edge fields on the same default,
+	// single-instance code path and must not leak an invalid value verbatim.
+	if edge.SrcIfIndex > 0 && edge.SrcIfIndex <= limits.MaxIfIndex {
 		attrs = append(attrs, attribute.String("src_if_index", strconv.Itoa(edge.SrcIfIndex)))
 	}
-	if edge.DstIfIndex != 0 {
+	if edge.DstIfIndex > 0 && edge.DstIfIndex <= limits.MaxIfIndex {
 		attrs = append(attrs, attribute.String("dst_if_index", strconv.Itoa(edge.DstIfIndex)))
 	}
 	for k, v := range edge.Metadata {
