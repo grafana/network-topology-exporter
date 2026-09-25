@@ -60,8 +60,15 @@ Service account name.
 {{- end }}
 
 {{/*
-Image reference.
+Image reference. config.federation.role: hub runs a separate image built
+from cmd/topology-hub (Dockerfile.hub, docs/proposals/core-hub-split.md §3);
+every other role uses the main topology-exporter image. Same role check
+NOTES.txt already uses to decide whether to print hub-specific guidance.
 */}}
 {{- define "topology-exporter.image" -}}
-{{- printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) }}
+{{- $repo := .Values.image.repository }}
+{{- if eq ((.Values.config).federation | default dict).role "hub" }}
+{{- $repo = .Values.image.hubRepository }}
+{{- end }}
+{{- printf "%s:%s" $repo (default .Chart.AppVersion .Values.image.tag) }}
 {{- end }}

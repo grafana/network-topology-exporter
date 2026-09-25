@@ -272,9 +272,13 @@ boundaries at all.
 
 This is a pure repackaging along an already-existing seam (§2.2's finding
 that federation is bolted on narrowly is what makes this cheap) — no
-behavior change for any deployment shape, and it removes the one
-concrete, measured cost (§2.3) from every build that isn't
-`cmd/topology-hub`.
+*behavior* change for any deployment shape (metrics, config schema, wire
+protocol, and federation semantics are byte-identical before/after for
+every role), and it removes the one concrete, measured cost (§2.3) from
+every build that isn't `cmd/topology-hub`. The table's last row is the one
+deployment-*mechanics* exception: hub operators must switch which
+image/binary they run. That is an operator-visible packaging change, not a
+behavior change — nothing the hub does, accepts, or emits differs.
 
 ## 4. Decision: does `known_inter_domain_links` have to stay in a shippable hub?
 
@@ -507,13 +511,16 @@ other. None of them depend on the KG rule being proven in production first
    shipping for the other two consumers. No dependency on this document's
    package split.
 2. **Ship now, independent of everything else: the core/hub binary split**
-   (§3). Pure repackaging, no behavior change, removes the measured
-   `k8s.io/client-go` cost from every non-hub build immediately. Does not
-   require the KG push job, the label-alignment additions, or any operator
-   decision about which stitching mechanism to prefer — it's orthogonal to
-   all of that. This is the one item in this document that can land first
-   with the least review risk, because §3.3's before/after table has no
-   behavior column that changes for any existing deployment shape.
+   (§3). Pure repackaging, no *behavior* change (see §3.3's closing note),
+   removes the measured `k8s.io/client-go` cost from every non-hub build
+   immediately. Does not require the KG push job, the label-alignment
+   additions, or any operator decision about which stitching mechanism to
+   prefer — it's orthogonal to all of that. This is the one item in this
+   document that can land first with the least review risk, because §3.3's
+   before/after table has no *behavior* column that changes for any
+   existing deployment shape — the sole operator-visible change is
+   deployment mechanics (§3.3's last row: hub operators swap which
+   image/binary they run), not a change in what the hub does.
 3. **Ship the label-alignment additions** (`src_if_index`/`dst_if_index`,
    `device_id`/`device` OTLP rename, `sys_name`, `management_ip`) on the
    schedule that document already lays out (its own §7) — unrelated to

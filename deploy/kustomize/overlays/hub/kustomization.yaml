@@ -35,3 +35,13 @@ patches:
     target:
       kind: NetworkPolicy
       name: topology-exporter
+
+# The hub runs as a separate binary/image (cmd/topology-hub, Dockerfile.hub;
+# docs/proposals/core-hub-split.md §3) so that only it links k8s.io/client-go
+# for the opt-in native-HA leader election. Every other overlay keeps the
+# base image (network-topology-exporter); this one swaps it for the hub
+# image, mirroring the Helm chart's image.hubRepository selection.
+images:
+  - name: ghcr.io/grafana/network-topology-exporter
+    newName: ghcr.io/grafana/network-topology-hub
+    newTag: latest

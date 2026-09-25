@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -37,6 +38,7 @@ import (
 	"github.com/grafana/network-topology-exporter/internal/config"
 	"github.com/grafana/network-topology-exporter/internal/discovery"
 	"github.com/grafana/network-topology-exporter/internal/federationhub"
+	"github.com/grafana/network-topology-exporter/internal/hubcli"
 	"github.com/grafana/network-topology-exporter/internal/metrics"
 	"github.com/grafana/network-topology-exporter/internal/otelx"
 	yangout "github.com/grafana/network-topology-exporter/internal/output/yang"
@@ -87,10 +89,12 @@ func run(ctx context.Context, args []string) int {
 	}
 
 	// The mirror image of cmd/topology-exporter's rejection: this binary only
-	// runs the hub. Any other role belongs in cmd/topology-exporter.
-	if cfg.Federation.Role != config.RoleHub {
-		logger.Error(`federation.role must be "hub" for cmd/topology-hub; run cmd/topology-exporter for standalone/uncoordinated/spoke roles`,
-			"role", cfg.Federation.Role, "config", *configPath)
+	// runs the hub. Any other role belongs in cmd/topology-exporter. The
+	// check itself lives in internal/hubcli so it (and the flag-override rule
+	// below) can be unit tested without spinning up a real server — see
+	// internal/hubcli/hubcli_test.go.
+	if err := hubcli.CheckRole(cfg.Federation.Role); err != nil {
+		logger.Error(err.Error(), "role", cfg.Federation.Role, "config", *configPath)
 		return 1
 	}
 	logger.Info("config loaded", "config", *configPath)
@@ -118,12 +122,13 @@ func run(ctx context.Context, args []string) int {
 		_, _ = fmt.Fprintf(w, "topology-hub %s\nendpoints: /metrics /healthz /readyz\n", version.Version)
 	})
 
-	effectiveAddr := cfg.Listen.Addr
+	var listenAddrExplicitlySet bool
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "web.listen-address" {
-			effectiveAddr = *listenAddr
+			listenAddrExplicitlySet = true
 		}
 	})
+	effectiveAddr := hubcli.EffectiveListenAddr(listenAddrExplicitlySet, *listenAddr, cfg.Listen.Addr)
 
 	srv := &http.Server{
 		Addr:              effectiveAddr,
@@ -138,11 +143,23 @@ func run(ctx context.Context, args []string) int {
 	// cmd/topology-exporter. Off by default.
 	var debugSrv *http.Server
 	if cfg.Listen.DebugListenAddr != "" {
+		// Mutex and block profiles are empty unless sampling is enabled at
+		// runtime. Enable conservative sampling ONLY when the debug endpoint is
+		// on, so there is zero overhead when it is off. Matches
+		// internal/app.Run's equivalent code path (internal/app/app.go) — this
+		// binary duplicates the debug-mux wiring rather than importing
+		// internal/app (see debug.go), so the sampling calls must be
+		// duplicated too, not just the mux.
+		runtime.SetMutexProfileFraction(100) // sample ~1/100 mutex contention events
+		runtime.SetBlockProfileRate(10000)   // sample blocking events ~every 10µs of block time
 		debugSrv = &http.Server{
 			Addr:              cfg.Listen.DebugListenAddr,
 			Handler:           newDebugMux(),
 			ReadHeaderTimeout: 10 * time.Second,
-			IdleTimeout:       120 * time.Second,
+			// No WriteTimeout: CPU/trace profiles stream for a caller-chosen
+			// number of seconds (e.g. ?seconds=30) and a write deadline would
+			// truncate them.
+			IdleTimeout: 120 * time.Second,
 		}
 	}
 

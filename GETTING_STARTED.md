@@ -191,6 +191,15 @@ topology as Prometheus metrics on `:9101`.
 
 `federation.role` is one of `standalone | uncoordinated | spoke | hub`.
 
+**Two separate binaries/images.** `standalone`, `uncoordinated`, and `spoke`
+all run `cmd/topology-exporter` (`ghcr.io/grafana/network-topology-exporter`),
+same as section 2 above. `hub` runs a **different** binary/image,
+`cmd/topology-hub` (`ghcr.io/grafana/network-topology-hub`) — a separate
+build so that only the hub links `k8s.io/client-go`, needed for the opt-in
+native-HA leader election (§ Federation in [README.md](README.md)). Every
+CLI flag, config key, and endpoint below is otherwise identical between the
+two binaries.
+
 ### 3.1 Set up the mTLS certificates
 
 Federation is mutual TLS using **PEM file paths** (this is *not* the
@@ -267,15 +276,31 @@ federation:
 
 ### 3.4 Run the hub, then the spokes
 
-On the **hub** host (PEMs already at `/etc/topology-exporter/tls/`):
+On the **hub** host (PEMs already at `/etc/topology-exporter/tls/`), build
+and run `cmd/topology-hub` — **not** `cmd/topology-exporter`:
 
 ```bash
+go build -o bin/topology-hub ./cmd/topology-hub
 export SNMP_COMMUNITY=public
-./bin/topology-exporter --config.file=./hub.yaml
+./bin/topology-hub --config.file=./hub.yaml
 # hub /metrics on :9100; spoke push endpoint on :9101
 ```
 
-On each **spoke** host:
+(`cmd/topology-exporter` rejects `federation.role: hub` at startup with a
+message pointing back here; `cmd/topology-hub` likewise rejects any role
+other than `hub`.) Via Docker, use the `network-topology-hub` image instead
+of `network-topology-exporter`:
+
+```bash
+docker build -f Dockerfile.hub -t network-topology-hub:dev .
+docker run --rm -p 9100:9100 -p 9101:9101 \
+  -v $PWD/hub.yaml:/etc/topology-exporter/config.yaml:ro \
+  -v /etc/topology-exporter/tls:/etc/topology-exporter/tls:ro \
+  network-topology-hub:dev
+```
+
+On each **spoke** host — this one *is* `cmd/topology-exporter`, same binary
+as standalone mode:
 
 ```bash
 export SNMP_COMMUNITY=public
@@ -283,9 +308,11 @@ export SNMP_COMMUNITY=public
 ```
 
 In Kubernetes, use the `hub` and `spoke` Kustomize overlays
-(`deploy/kustomize/overlays/hub`, `.../spoke`); mount the PEM files via a
-Secret and **expose `:9101` on the hub** (Service/ingress) so spokes can reach
-`hub_url`.
+(`deploy/kustomize/overlays/hub`, `.../spoke`) — the `hub` overlay already
+points at the `network-topology-hub` image, no edit needed; mount the PEM
+files via a Secret and **expose `:9101` on the hub** (Service/ingress) so
+spokes can reach `hub_url`. The Helm chart does the equivalent image
+selection automatically based on `config.federation.role`.
 
 ### 3.5 Verify
 

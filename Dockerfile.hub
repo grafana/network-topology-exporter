@@ -41,7 +41,12 @@ LABEL org.opencontainers.image.source="https://github.com/grafana/network-topolo
 USER nonroot:nonroot
 
 COPY --from=builder /out/topology-hub /usr/local/bin/topology-hub
-COPY config/example.yaml /etc/topology-exporter/config.yaml
+# config/example.yaml's federation.role defaults to "standalone", which
+# cmd/topology-hub rejects at startup (internal/hubcli.CheckRole) — that
+# combination crash-loops a plain `docker run` of this image. Use the
+# hub-specific default instead (federation.role: hub + placeholder mTLS
+# paths; see config/hub-example.yaml for why they're placeholders).
+COPY config/hub-example.yaml /etc/topology-exporter/config.yaml
 
 EXPOSE 9100
 

@@ -1,0 +1,29 @@
+# network-topology-exporter — federation hub example configuration.
+#
+# This is the config baked into the cmd/topology-hub Docker image
+# (Dockerfile.hub) as the default /etc/topology-exporter/config.yaml.
+# Unlike config/example.yaml — whose federation.role defaults to
+# "standalone" and is REJECTED at startup by cmd/topology-hub (see
+# internal/config/validate.go's per-role checks and internal/hubcli) — this
+# file sets federation.role: hub and the mTLS material every hub role must
+# provide (LD-20, internal/config/validate.go's validateFederation).
+#
+# Every key below except federation.* is left at its documented default; see
+# config/example.yaml for the full, actively-documented schema.
+#
+# The tls_* paths are PLACEHOLDERS, matching the mount point the Helm chart
+# (deploy/helm/topology-exporter, federation.tlsSecret) and the Kustomize hub
+# overlay (deploy/kustomize/overlays/hub/configmap.yaml) both use. This image
+# does NOT and must NOT bake in real TLS material — mount your own mTLS
+# cert/key/CA at /etc/topology-exporter/pki/ before running it. A bare
+# `docker run` with no cert volume still exits non-zero, but now with a clear
+# "no such file" error on the missing certificate rather than the old
+# `federation.role must be "hub"` rejection that fired before the hub server
+# even got as far as looking for TLS material.
+federation:
+  role: hub
+  hub:
+    listen_addr: ":9101"
+    tls_ca_cert: /etc/topology-exporter/pki/ca.crt
+    tls_cert: /etc/topology-exporter/pki/tls.crt
+    tls_key: /etc/topology-exporter/pki/tls.key
