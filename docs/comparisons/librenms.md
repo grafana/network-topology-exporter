@@ -23,7 +23,7 @@ topology-discovery code path in each.
 | Discovery cycle | Default 60 s, every cycle is a full walk | Default 6 hours, full walk |
 | Vendor dispatch | Canonical-vendor switch with shared MIB walker (`vendorSpecFor` in `internal/discovery/bgp/bgp_vendor.go`); falls back to vendor-neutral RFC walker | `if/elseif ($device['os'])` chain per module (`includes/discovery/discovery-protocols.inc.php`) |
 | Reconciliation | Edge-diff + 2-source conflict detection + stale-edge aging (`internal/graph/graph.go`) | Hard-delete rows not seen in current run; no cross-protocol conflict surfacing |
-| Federation | mTLS spoke/hub with payload validation (`internal/federation/`) | Shared MySQL + Redis + per-device `poller_group`; no inter-instance sync |
+| Federation | mTLS spoke/hub with payload validation (`internal/federation/` spoke, `internal/federationhub/` hub — split into separate binaries, `docs/proposals/core-hub-split.md`) | Shared MySQL + Redis + per-device `poller_group`; no inter-instance sync |
 | License | AGPL-3.0 | GPL v3 |
 | Topology LOC | ~5,000 (excl. tests) | ~3,000 (xdp + supporting code) |
 | Tests | ~20,000 LOC, ~1.8× the implementation | Some, mostly integration via fixture-driven `tests/` |
@@ -314,7 +314,10 @@ LibreNMS:
 
 This exporter:
 
-- mTLS hub/spoke (`internal/federation/`). Spokes push their reconciled
+- mTLS hub/spoke (`internal/federation/` for the spoke side, shipped in
+  `cmd/topology-exporter`; `internal/federationhub/` for the hub side,
+  shipped in the separate `cmd/topology-hub` binary — see
+  `docs/proposals/core-hub-split.md`). Spokes push their reconciled
   per-CIDR graph to a hub on `:9101/spoke/push`. Hub re-reconciles across
   all spokes, surfaces unified metrics.
 - Spoke push validates client cert via `RequireAndVerifyClientCert` +
@@ -408,4 +411,4 @@ walkers" thesis.
 
 - LibreNMS docs: [Discovery](https://docs.librenms.org/Support/Discovery/), [Network Map](https://docs.librenms.org/Extensions/Network-Map/), [Distributed Poller](https://docs.librenms.org/Extensions/Distributed-Poller/)
 - LibreNMS source: [discovery.php](https://github.com/librenms/librenms/blob/master/discovery.php), [discovery-protocols.inc.php](https://github.com/librenms/librenms/blob/master/includes/discovery/discovery-protocols.inc.php), [ArpTable.php](https://github.com/librenms/librenms/blob/master/LibreNMS/Modules/ArpTable.php), [Ospf.php](https://github.com/librenms/librenms/blob/master/LibreNMS/Modules/Ospf.php), [links migration](https://github.com/librenms/librenms/blob/master/database/migrations/2018_07_03_091314_create_links_table.php)
-- This repo: `internal/discovery/lldp/lldp.go`, `internal/discovery/bgp/bgp_vendor.go`, `internal/graph/graph.go`, `internal/federation/`, `docs/audits/2026-05-architectural-review.md`
+- This repo: `internal/discovery/lldp/lldp.go`, `internal/discovery/bgp/bgp_vendor.go`, `internal/graph/graph.go`, `internal/federation/`, `internal/federationhub/`, `docs/audits/2026-05-architectural-review.md`

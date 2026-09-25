@@ -1,4 +1,4 @@
-package federation
+package federationhub
 
 // Publication: the generation-fenced publishIfWinner commit path and the
 // snapshot-restore metric swap. Split from hub.go (#168) — same-package move,

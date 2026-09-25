@@ -18,6 +18,11 @@
           "minLength": 1,
           "description": "Container image repository."
         },
+        "hubRepository": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Container image repository used when config.federation.role is \"hub\" (built from cmd/topology-hub / Dockerfile.hub)."
+        },
         "tag": {
           "type": "string",
           "description": "Image tag. Defaults to Chart.appVersion when empty."
@@ -28,7 +33,7 @@
           "description": "Kubernetes image pull policy."
         }
       },
-      "required": ["repository", "pullPolicy"]
+      "required": ["repository", "hubRepository", "pullPolicy"]
     },
 
     "imagePullSecrets": {

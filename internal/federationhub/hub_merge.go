@@ -1,4 +1,4 @@
-package federation
+package federationhub
 
 // Combined-graph construction: spoke registry snapshotting, cross-domain edge
 // synthesis from OOS name-matching (LD-15/LD-19), known inter-domain link

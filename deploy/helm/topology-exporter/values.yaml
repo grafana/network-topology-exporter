@@ -6,6 +6,12 @@ replicaCount: 1
 
 image:
   repository: network-topology-exporter
+  # Image used when config.federation.role is "hub" (docs/proposals/
+  # core-hub-split.md §3). The hub is now built and shipped as a separate
+  # binary/image (cmd/topology-hub, Dockerfile.hub) so that only it links
+  # k8s.io/client-go, needed for the opt-in native-HA leader election —
+  # every other role keeps using `repository` above.
+  hubRepository: network-topology-hub
   tag: ""  # defaults to Chart.appVersion
   pullPolicy: IfNotPresent
 

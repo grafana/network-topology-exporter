@@ -24,6 +24,7 @@ import (
 	"github.com/grafana/network-topology-exporter/internal/config"
 	"github.com/grafana/network-topology-exporter/internal/discovery"
 	"github.com/grafana/network-topology-exporter/internal/federation"
+	"github.com/grafana/network-topology-exporter/internal/federationhub"
 	"github.com/grafana/network-topology-exporter/internal/metrics"
 )
 
@@ -186,7 +187,7 @@ func TestHubSpokeEndToEnd(t *testing.T) {
 	}
 
 	m := metrics.New(false)
-	hub := federation.NewHub(hubCfg, m, slog.Default(), "")
+	hub := federationhub.NewHub(hubCfg, m, slog.Default(), "")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

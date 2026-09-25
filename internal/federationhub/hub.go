@@ -1,8 +1,17 @@
-package federation
-
+// Package federationhub implements the LD-16, LD-18–LD-20 federation hub: the
+// pure aggregator that receives spoke pushes over mTLS, combines them into one
+// reconciled graph, and (when federation.hub.ha.enabled) coordinates HA leader
+// election via a Kubernetes Lease. It was split out of internal/federation
+// (which keeps the spoke-side push transport and the shared SpokePayload wire
+// type) by the core/hub binary split (docs/proposals/core-hub-split.md §3.2),
+// so that k8s.io/client-go — needed only for the opt-in HA elector in
+// elector_k8s.go — is imported by this package alone, and linked only into
+// cmd/topology-hub, the sole importer of this package.
+//
 // Core Hub type, constructor, panic recovery, snapshot restore, and the
-// leader/lease accessors. The remaining hub concerns live in sibling files
-// (#168 decomposition — same-package moves, no behaviour change):
+// leader/lease accessors live in this file. The remaining hub concerns live
+// in sibling files (#168 decomposition — same-package moves, no behaviour
+// change):
 //
 //	hub_server.go   — mTLS server bootstrap and lifecycle (Serve)
 //	hub_push.go     — /spoke/push handling and the structured reject contract
@@ -11,6 +20,7 @@ package federation
 //	hub_eviction.go — LD-18 silent-spoke eviction
 //	hub_publish.go  — generation-fenced publishIfWinner commit path
 //	hub_snapshot.go — LD-13 snapshot writer goroutine and async enqueue
+package federationhub
 
 import (
 	"log/slog"
@@ -21,12 +31,13 @@ import (
 
 	"github.com/grafana/network-topology-exporter/internal/config"
 	"github.com/grafana/network-topology-exporter/internal/discovery"
+	"github.com/grafana/network-topology-exporter/internal/federation"
 	"github.com/grafana/network-topology-exporter/internal/metrics"
 	"github.com/grafana/network-topology-exporter/internal/snapshot"
 )
 
 type spokeEntry struct {
-	payload  SpokePayload
+	payload  federation.SpokePayload
 	lastSeen time.Time
 }
 
@@ -39,7 +50,7 @@ type acceptedPush struct {
 	entry spokeEntry
 }
 
-// Hub aggregates SpokePayload pushes from spoke instances, reconciles the
+// Hub aggregates federation.SpokePayload pushes from spoke instances, reconciles the
 // combined edge set across all spoke domains, and updates the shared
 // Prometheus metrics with the unified topology. Per LD-16, spokes push;
 // the hub never polls spokes.

@@ -21,6 +21,11 @@ build: ## Build the binary into bin/
 	mkdir -p bin
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/$(BINARY) ./cmd/topology-exporter
 
+.PHONY: build-hub
+build-hub: ## Build the federation-hub binary (federation.role: hub) into bin/
+	mkdir -p bin
+	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/topology-hub ./cmd/topology-hub
+
 .PHONY: run
 run: build ## Build and run with the example config
 	./bin/$(BINARY) --config.file=config/example.yaml
@@ -65,6 +70,17 @@ docker: ## Build the container image
 	  --build-arg DATE=$(DATE) \
 	  -t network-topology-exporter:$(VERSION) \
 	  -t network-topology-exporter:dev \
+	  .
+
+.PHONY: docker-hub
+docker-hub: ## Build the federation-hub container image (see Dockerfile.hub)
+	docker build \
+	  --build-arg VERSION=$(VERSION) \
+	  --build-arg COMMIT=$(COMMIT) \
+	  --build-arg DATE=$(DATE) \
+	  -f Dockerfile.hub \
+	  -t network-topology-hub:$(VERSION) \
+	  -t network-topology-hub:dev \
 	  .
 
 .PHONY: test-integration

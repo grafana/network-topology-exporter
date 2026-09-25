@@ -1,4 +1,4 @@
-package federation
+package federationhub
 
 import (
 	"bytes"
@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/grafana/network-topology-exporter/internal/config"
+	"github.com/grafana/network-topology-exporter/internal/federation"
 	"github.com/grafana/network-topology-exporter/internal/metrics"
 )
 
@@ -70,7 +71,7 @@ func TestHubIsReadyFalseBeforeAnyPush(t *testing.T) {
 func TestHubIsReadyTrueAfterPush(t *testing.T) {
 	h := newTestHub(nil)
 
-	payload := SpokePayload{SpokeID: "dc-ready", CycleAt: time.Now()}
+	payload := federation.SpokePayload{SpokeID: "dc-ready", CycleAt: time.Now()}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)

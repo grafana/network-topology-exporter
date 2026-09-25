@@ -81,6 +81,12 @@ The Kustomize overlays `standalone`, `hub`, and `spoke` map to the corresponding
 (Argo CD / Flux) or Helm-free clusters. See
 [`deploy/kustomize/README.md`](deploy/kustomize/README.md).
 
+`federation.role: hub` deploys a **different image**,
+`ghcr.io/grafana/network-topology-hub` (built from `cmd/topology-hub`,
+`Dockerfile.hub`) — both the `hub` Kustomize overlay and the Helm chart
+(`image.hubRepository`) select it automatically; every other role keeps
+`ghcr.io/grafana/network-topology-exporter`.
+
 ## Emitted signals
 
 ### Prometheus metrics
@@ -303,7 +309,7 @@ A single instance covers one contiguous CIDR range. Links that cross a boundary 
 |---|---|
 | `uncoordinated` | Each instance emits `network_topology_boundary_observation_info` per OOS neighbour. A Mimir recording rule `count by(peer_a,peer_b,proto)(...) == 2` fires when both sides report — no inter-instance coordination required. |
 | `spoke` | Instances push their reconciled graph to a hub after each cycle. The hub aggregates, re-reconciles across all domains, and emits unified metrics. Requires mutual TLS (mTLS). |
-| `hub` | Pure aggregator — no local SNMP discovery. Receives spoke pushes on a separate listener (default `:9101`). |
+| `hub` | Pure aggregator — no local SNMP discovery. Receives spoke pushes on a separate listener (default `:9101`). Runs as a **separate binary/image**, `cmd/topology-hub` (`ghcr.io/grafana/network-topology-hub`) — only it links `k8s.io/client-go`, needed for the opt-in native-HA leader election below. `standalone`/`uncoordinated`/`spoke` all run `cmd/topology-exporter` as before. |
 
 Spoke pushes are gzip-compressed by default (`federation.spoke.compression: gzip`, or `none` to disable) — topology JSON typically shrinks 10–20×, keeping large graphs well below the hub's 32 MiB body cap.
 

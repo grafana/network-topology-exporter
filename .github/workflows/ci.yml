@@ -40,6 +40,12 @@ jobs:
       - name: go build
         run: go build ./...
 
+      # go build ./... above already covers cmd/topology-hub, but it is
+      # called out explicitly so a future refactor that narrows the top-level
+      # build step's scope can't silently stop building the hub binary.
+      - name: go build cmd/topology-hub
+        run: go build ./cmd/topology-hub
+
       - name: unit tests
         run: go test ./... -race -count=1 -timeout 120s -coverprofile=coverage.out
 
@@ -215,9 +221,20 @@ jobs:
             > /dev/null
 
   docker:
-    name: docker build
+    name: docker build (${{ matrix.image }})
     runs-on: ubuntu-latest
     needs: [build-test, lint]
+    strategy:
+      matrix:
+        include:
+          - image: network-topology-exporter
+            dockerfile: Dockerfile
+          # cmd/topology-hub's image (Dockerfile.hub, docs/proposals/
+          # core-hub-split.md §3) gets the same build-no-push smoke check as
+          # the main image so a Dockerfile.hub break fails CI instead of
+          # surfacing only at release/deploy time.
+          - image: network-topology-hub
+            dockerfile: Dockerfile.hub
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
@@ -229,9 +246,10 @@ jobs:
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
+          file: ${{ matrix.dockerfile }}
           push: false
           platforms: linux/amd64,linux/arm64
-          tags: network-topology-exporter:ci
+          tags: ${{ matrix.image }}:ci
           build-args: |
             VERSION=ci
             COMMIT=${{ github.sha }}
@@ -321,6 +339,18 @@ jobs:
         if: hashFiles('tests/scripts/test_redact_snmp_capture.py') != ''
         run: pytest tests/scripts/test_redact_snmp_capture.py -v
 
+  # FOLLOW-UP (docs/proposals/core-hub-split.md §3): this job only builds,
+  # signs, SBOMs, and attests the main network-topology-exporter image and
+  # binaries. It does not yet do the same for cmd/topology-hub's image
+  # (Dockerfile.hub) or a topology-hub binary. Unlike the `docker` job above
+  # (a single independent build-no-push step, trivially matrixed), this job
+  # is a long linear chain that assembles ONE offline tarball + GitHub
+  # release from its own build/sign/SBOM outputs; giving topology-hub the
+  # same treatment needs either a second full copy of this chain or a
+  # restructure into a matrix job (per image/binary) that hands artifacts to
+  # a separate assemble-and-release job — both untested here, and this job
+  # only ever runs for real against ghcr.io/cosign on a `v*` tag push, so
+  # getting it wrong is expensive to notice. Left for a follow-up PR.
   release:
     name: release
     runs-on: ubuntu-latest

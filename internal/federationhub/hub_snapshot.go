@@ -1,4 +1,4 @@
-package federation
+package federationhub
 
 // LD-13 snapshot persistence: the bounded single-writer goroutine and the
 // async enqueue path that keeps an NFS stall from accumulating goroutines.

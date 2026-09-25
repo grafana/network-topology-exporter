@@ -144,15 +144,27 @@ kubectl kustomize deploy/kustomize/overlays/standalone
   (Sealed Secrets, External Secrets, SOPS, Vault) and drop `secret.yaml` from
   `base/kustomization.yaml`. Consume secret values in the Deployment via
   `env`/`valueFrom.secretKeyRef`.
-- **Image / tag** — pin per environment:
+- **Image / tag** — the `hub` overlay already points at a different image
+  than `standalone`/`spoke`: `network-topology-hub` (built from
+  `cmd/topology-hub` / `Dockerfile.hub`), not `network-topology-exporter`.
+  Only the hub image links `k8s.io/client-go`, needed for the opt-in
+  native-HA leader election (see `overlays/hub/kustomization.yaml`'s
+  `images:` override). Pin the tag per environment:
 
   ```sh
+  # standalone / spoke
   cd deploy/kustomize/overlays/standalone
   kustomize edit set image \
     ghcr.io/grafana/network-topology-exporter=ghcr.io/grafana/network-topology-exporter:1.0.0
+
+  # hub
+  cd deploy/kustomize/overlays/hub
+  kustomize edit set image \
+    ghcr.io/grafana/network-topology-exporter=ghcr.io/grafana/network-topology-hub:1.0.0
   ```
 
-  (or edit `images:` in `base/kustomization.yaml`).
+  (or edit `images:` in `base/kustomization.yaml` for the base tag, and
+  `overlays/hub/kustomization.yaml` for the hub image/tag).
 
 ### Federation mTLS (hub and spoke)
 

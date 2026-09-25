@@ -1,4 +1,4 @@
-package federation
+package federationhub
 
 // Tests split from hub_test.go (#168); see hub_merge.go.
 import (
@@ -12,6 +12,7 @@ import (
 
 	"github.com/grafana/network-topology-exporter/internal/config"
 	"github.com/grafana/network-topology-exporter/internal/discovery"
+	"github.com/grafana/network-topology-exporter/internal/federation"
 	"github.com/grafana/network-topology-exporter/internal/metrics"
 )
 
@@ -21,7 +22,7 @@ func TestHubCombinedGraphSingleSpoke(t *testing.T) {
 	h := newTestHub(nil)
 	h.mu.Lock()
 	h.spokes["dc-a"] = spokeEntry{
-		payload: SpokePayload{
+		payload: federation.SpokePayload{
 			SpokeID: "dc-a",
 			Devices: []discovery.Device{{ID: "sw-a"}, {ID: "sw-b"}},
 			Edges: []discovery.Edge{
@@ -57,7 +58,7 @@ func TestHubCrossdomainOOSMatching(t *testing.T) {
 	h := newTestHub(nil)
 	h.mu.Lock()
 	h.spokes["dc-a"] = spokeEntry{
-		payload: SpokePayload{
+		payload: federation.SpokePayload{
 			SpokeID: "dc-a",
 			OutOfScope: []discovery.OutOfScopeNeighbour{
 				{ReportingDevice: "sw-a", ReportingPort: "Gi0/1", NeighbourHint: "sw-b", Proto: "lldp"},
@@ -66,7 +67,7 @@ func TestHubCrossdomainOOSMatching(t *testing.T) {
 		lastSeen: time.Now(),
 	}
 	h.spokes["dc-b"] = spokeEntry{
-		payload: SpokePayload{
+		payload: federation.SpokePayload{
 			SpokeID: "dc-b",
 			OutOfScope: []discovery.OutOfScopeNeighbour{
 				{ReportingDevice: "sw-b", ReportingPort: "Gi0/2", NeighbourHint: "sw-a", Proto: "lldp"},
@@ -104,7 +105,7 @@ func TestHubOOSCaseMismatchProducesEdge(t *testing.T) {
 	h.mu.Lock()
 	// dc-a reports hint "CORE-01" (uppercase); dc-b's sysName is "core-01".
 	h.spokes["dc-a"] = spokeEntry{
-		payload: SpokePayload{
+		payload: federation.SpokePayload{
 			OutOfScope: []discovery.OutOfScopeNeighbour{
 				{ReportingDevice: "sw-a", ReportingPort: "Gi0/1", NeighbourHint: "CORE-01", Proto: "lldp"},
 			},
@@ -112,7 +113,7 @@ func TestHubOOSCaseMismatchProducesEdge(t *testing.T) {
 		lastSeen: time.Now(),
 	}
 	h.spokes["dc-b"] = spokeEntry{
-		payload: SpokePayload{
+		payload: federation.SpokePayload{
 			OutOfScope: []discovery.OutOfScopeNeighbour{
 				{ReportingDevice: "core-01", ReportingPort: "Gi0/2", NeighbourHint: "sw-a", Proto: "lldp"},
 			},
@@ -137,7 +138,7 @@ func TestHubOOSMultiPortLAG(t *testing.T) {
 	h := newTestHub(nil)
 	h.mu.Lock()
 	h.spokes["dc-a"] = spokeEntry{
-		payload: SpokePayload{
+		payload: federation.SpokePayload{
 			OutOfScope: []discovery.OutOfScopeNeighbour{
 				{ReportingDevice: "sw-a", ReportingPort: "Gi0/1", NeighbourHint: "sw-b", Proto: "lldp"},
 				{ReportingDevice: "sw-a", ReportingPort: "Gi0/2", NeighbourHint: "sw-b", Proto: "lldp"},
@@ -146,7 +147,7 @@ func TestHubOOSMultiPortLAG(t *testing.T) {
 		lastSeen: time.Now(),
 	}
 	h.spokes["dc-b"] = spokeEntry{
-		payload: SpokePayload{
+		payload: federation.SpokePayload{
 			OutOfScope: []discovery.OutOfScopeNeighbour{
 				{ReportingDevice: "sw-b", ReportingPort: "Gi1/1", NeighbourHint: "sw-a", Proto: "lldp"},
 				{ReportingDevice: "sw-b", ReportingPort: "Gi1/2", NeighbourHint: "sw-a", Proto: "lldp"},
@@ -178,11 +179,11 @@ func TestHubKnownInterDomainLinkInjected(t *testing.T) {
 	h := newTestHub(links)
 	h.mu.Lock()
 	h.spokes["dc-a"] = spokeEntry{
-		payload:  SpokePayload{SpokeID: "dc-a", Devices: []discovery.Device{{ID: "sw-a"}}},
+		payload:  federation.SpokePayload{SpokeID: "dc-a", Devices: []discovery.Device{{ID: "sw-a"}}},
 		lastSeen: time.Now(),
 	}
 	h.spokes["dc-b"] = spokeEntry{
-		payload:  SpokePayload{SpokeID: "dc-b", Devices: []discovery.Device{{ID: "sw-b"}}},
+		payload:  federation.SpokePayload{SpokeID: "dc-b", Devices: []discovery.Device{{ID: "sw-b"}}},
 		lastSeen: time.Now(),
 	}
 	g := h.combinedGraphLocked()
@@ -208,11 +209,11 @@ func TestHubKnownLinkCustomLinkKind(t *testing.T) {
 	h := newTestHub(links)
 	h.mu.Lock()
 	h.spokes["dc-a"] = spokeEntry{
-		payload:  SpokePayload{SpokeID: "dc-a", Devices: []discovery.Device{{ID: "sw-a"}}},
+		payload:  federation.SpokePayload{SpokeID: "dc-a", Devices: []discovery.Device{{ID: "sw-a"}}},
 		lastSeen: time.Now(),
 	}
 	h.spokes["dc-b"] = spokeEntry{
-		payload:  SpokePayload{SpokeID: "dc-b", Devices: []discovery.Device{{ID: "sw-b"}}},
+		payload:  federation.SpokePayload{SpokeID: "dc-b", Devices: []discovery.Device{{ID: "sw-b"}}},
 		lastSeen: time.Now(),
 	}
 	g := h.combinedGraphLocked()
@@ -237,7 +238,7 @@ func TestHubKnownLinkBeatsOOS(t *testing.T) {
 	// Also inject matching OOS observations — same edge, different port names.
 	// Devices must be present so the IDL guard passes.
 	h.spokes["dc-a"] = spokeEntry{
-		payload: SpokePayload{
+		payload: federation.SpokePayload{
 			Devices: []discovery.Device{{ID: "sw-a"}},
 			OutOfScope: []discovery.OutOfScopeNeighbour{
 				{ReportingDevice: "sw-a", ReportingPort: "GigabitEthernet0/1", NeighbourHint: "sw-b", Proto: "cdp"},
@@ -246,7 +247,7 @@ func TestHubKnownLinkBeatsOOS(t *testing.T) {
 		lastSeen: time.Now(),
 	}
 	h.spokes["dc-b"] = spokeEntry{
-		payload: SpokePayload{
+		payload: federation.SpokePayload{
 			Devices: []discovery.Device{{ID: "sw-b"}},
 			OutOfScope: []discovery.OutOfScopeNeighbour{
 				{ReportingDevice: "sw-b", ReportingPort: "GigabitEthernet0/2", NeighbourHint: "sw-a", Proto: "cdp"},
@@ -277,7 +278,7 @@ func TestHubOOSNoMatchProducesNoEdge(t *testing.T) {
 	h := newTestHub(nil)
 	h.mu.Lock()
 	h.spokes["dc-a"] = spokeEntry{
-		payload: SpokePayload{
+		payload: federation.SpokePayload{
 			OutOfScope: []discovery.OutOfScopeNeighbour{
 				{ReportingDevice: "sw-a", ReportingPort: "Gi0/1", NeighbourHint: "sw-b", Proto: "lldp"},
 			},
@@ -303,7 +304,7 @@ func TestHubOOSDomainStripProducesEdge(t *testing.T) {
 	h.mu.Lock()
 	// dc-a sees the neighbour with its FQDN; dc-b reports its bare hostname.
 	h.spokes["dc-a"] = spokeEntry{
-		payload: SpokePayload{
+		payload: federation.SpokePayload{
 			OutOfScope: []discovery.OutOfScopeNeighbour{
 				{ReportingDevice: "sw-a", ReportingPort: "Gi0/1", NeighbourHint: "core-01.internal.corp", Proto: "lldp"},
 			},
@@ -311,7 +312,7 @@ func TestHubOOSDomainStripProducesEdge(t *testing.T) {
 		lastSeen: time.Now(),
 	}
 	h.spokes["dc-b"] = spokeEntry{
-		payload: SpokePayload{
+		payload: federation.SpokePayload{
 			OutOfScope: []discovery.OutOfScopeNeighbour{
 				{ReportingDevice: "core-01", ReportingPort: "Gi0/2", NeighbourHint: "sw-a", Proto: "lldp"},
 			},
@@ -339,7 +340,7 @@ func TestHubOOSStrictDefaultPreventsCrossDCCollision(t *testing.T) {
 	h.mu.Lock()
 	// dc-a sees a neighbour it calls "core-01.dc1"; this is the dc1 core.
 	h.spokes["dc-a"] = spokeEntry{
-		payload: SpokePayload{
+		payload: federation.SpokePayload{
 			OutOfScope: []discovery.OutOfScopeNeighbour{
 				{ReportingDevice: "sw-a", ReportingPort: "Gi0/1", NeighbourHint: "core-01.dc1", Proto: "lldp"},
 			},
@@ -349,7 +350,7 @@ func TestHubOOSStrictDefaultPreventsCrossDCCollision(t *testing.T) {
 	// dc-b reports its bare hostname "core-01" — under loose matching this would
 	// collide with "core-01.dc1" and produce a false edge. Under strict, it must not.
 	h.spokes["dc-b"] = spokeEntry{
-		payload: SpokePayload{
+		payload: federation.SpokePayload{
 			OutOfScope: []discovery.OutOfScopeNeighbour{
 				{ReportingDevice: "core-01", ReportingPort: "Gi0/2", NeighbourHint: "sw-a", Proto: "lldp"},
 			},
@@ -375,7 +376,7 @@ func TestBuildCombinedGraphProtoFallbackToRemote(t *testing.T) {
 	h.mu.Lock()
 	// dc-a reports no proto; dc-b reports "cdp".
 	h.spokes["dc-a"] = spokeEntry{
-		payload: SpokePayload{
+		payload: federation.SpokePayload{
 			OutOfScope: []discovery.OutOfScopeNeighbour{
 				{ReportingDevice: "sw-a", ReportingPort: "Gi0/1", NeighbourHint: "sw-b", Proto: ""},
 			},
@@ -383,7 +384,7 @@ func TestBuildCombinedGraphProtoFallbackToRemote(t *testing.T) {
 		lastSeen: time.Now(),
 	}
 	h.spokes["dc-b"] = spokeEntry{
-		payload: SpokePayload{
+		payload: federation.SpokePayload{
 			OutOfScope: []discovery.OutOfScopeNeighbour{
 				{ReportingDevice: "sw-b", ReportingPort: "Gi0/2", NeighbourHint: "sw-a", Proto: "cdp"},
 			},
@@ -425,7 +426,7 @@ func TestHubOOSAmbiguousFQDNNormalisationWarns(t *testing.T) {
 	h.mu.Lock()
 	// spoke dc-1 sees core-sw-01.dc1 as a neighbour.
 	h.spokes["dc-1"] = spokeEntry{
-		payload: SpokePayload{
+		payload: federation.SpokePayload{
 			SpokeID: "dc-1",
 			OutOfScope: []discovery.OutOfScopeNeighbour{
 				{ReportingDevice: "edge-sw-01", ReportingPort: "Gi0/1", NeighbourHint: "core-sw-01.dc1", Proto: "lldp"},
@@ -436,7 +437,7 @@ func TestHubOOSAmbiguousFQDNNormalisationWarns(t *testing.T) {
 	// spoke dc-2 sees core-sw-01.dc2 as a neighbour — different physical device,
 	// same bare hostname after normalisation.
 	h.spokes["dc-2"] = spokeEntry{
-		payload: SpokePayload{
+		payload: federation.SpokePayload{
 			SpokeID: "dc-2",
 			OutOfScope: []discovery.OutOfScopeNeighbour{
 				{ReportingDevice: "edge-sw-02", ReportingPort: "Gi0/1", NeighbourHint: "core-sw-01.dc2", Proto: "lldp"},
@@ -465,7 +466,7 @@ func TestHubOOSUnmatchedMetricIncrementsOnMiss(t *testing.T) {
 	h.mu.Lock()
 	// Only one side reports; no reverse match so the hint is unmatched.
 	h.spokes["dc-a"] = spokeEntry{
-		payload: SpokePayload{
+		payload: federation.SpokePayload{
 			OutOfScope: []discovery.OutOfScopeNeighbour{
 				{ReportingDevice: "sw-a", ReportingPort: "Gi0/1", NeighbourHint: "sw-unknown", Proto: "lldp"},
 			},
