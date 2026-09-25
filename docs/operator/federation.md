@@ -125,6 +125,17 @@ The hub's Prometheus metrics are served on the normal listen address (default `:
 
 Firewall: allow spokes to reach the hub on port 9101. The hub does not need outbound connectivity to spokes.
 
+> **Binary/image change (`docs/proposals/core-hub-split.md`):** `role: hub`
+> now runs in a separate `cmd/topology-hub` binary/image, not
+> `network-topology-exporter`/`cmd/topology-exporter` — which now rejects
+> `role: hub` at startup with a pointer here. The `role: spoke`/`uncoordinated`/
+> `standalone` config on this page is unaffected and still runs on
+> `cmd/topology-exporter`. **`deploy/helm/topology-exporter` has not yet been
+> updated to build or deploy the new `cmd/topology-hub` image** — until it is,
+> operators running a hub need to build/push a `topology-hub` image (see
+> `Dockerfile.hub`, `make docker-hub`) and override the chart's `image`/`command`
+> for the hub release themselves.
+
 ## Spoke push response contract
 
 The hub's `POST /spoke/push` returns one of the following status codes. Tools and dashboards consuming spoke push outcomes should branch on `status` and (for rejected pushes) on the JSON `reason` field, not on free-form message text.
@@ -364,6 +375,11 @@ stand by, ready to take over. Failover is automatic — no manual cutover, no
 operator-side load balancer tricks. HA is **opt-in** and **Kubernetes-only**;
 single-hub deployments (`replicaCount: 1`, HA disabled) are unchanged and make
 no Kubernetes API calls.
+
+The k8s.io/client-go leader-election client this depends on now lives in
+`internal/federationhub/elector_k8s.go`, imported only by `cmd/topology-hub`
+(`docs/proposals/core-hub-split.md` §2.3/§3) — it is no longer linked into
+`cmd/topology-exporter` at all, regardless of role or whether HA is enabled.
 
 The full design rationale lives in
 [`docs/superpowers/specs/2026-06-09-hub-ha-design.md`](../superpowers/specs/2026-06-09-hub-ha-design.md)

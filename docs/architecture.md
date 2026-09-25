@@ -1,6 +1,6 @@
 # Architecture
 
-`network-topology-exporter` is a single Go binary modelled on the [Prometheus exporter pattern](https://prometheus.io/docs/instrumenting/writing_exporters/). It runs a periodic discovery cycle and exposes the results through two always-on, industry-standard signals — Prometheus metrics and structured JSON log lines to stderr — plus optional OTLP push and an optional RFC 8345 YANG document endpoint (see the output contract below).
+`network-topology-exporter` is a Go module built into two binaries: `cmd/topology-exporter`, modelled on the [Prometheus exporter pattern](https://prometheus.io/docs/instrumenting/writing_exporters/), and the optional `cmd/topology-hub` federation-hub aggregator (see [Federation](#federation) below). `cmd/topology-exporter` runs a periodic discovery cycle and exposes the results through two always-on, industry-standard signals — Prometheus metrics and structured JSON log lines to stderr — plus optional OTLP push and an optional RFC 8345 YANG document endpoint (see the output contract below). `cmd/topology-hub` runs no local discovery cycle at all; it aggregates spoke pushes and exposes the combined graph through the same two always-on signals.
 
 ## Design principles
 
@@ -24,7 +24,9 @@ Four operational commitments:
 
 ```
 .
-├── cmd/topology-exporter/main.go     # entrypoint, HTTP server, discovery loop
+├── cmd/
+│   ├── topology-exporter/main.go     # core entrypoint: HTTP server, discovery loop (standalone/uncoordinated/spoke)
+│   └── topology-hub/main.go          # optional federation-hub entrypoint (federation.role: hub only)
 ├── internal/
 │   ├── config/                       # YAML config schema + validation (LD-11 scope guard)
 │   ├── version/                      # build metadata (ldflags-injected)
@@ -33,10 +35,15 @@ Four operational commitments:
 │   ├── credentials/                  # LD-12 named profiles, resolver, trial limiter, cache
 │   ├── snapshot/                     # LD-13 versioned JSON persistence (atomic write)
 │   ├── graph/                        # LD-10 reconciliation + LD-14 unconfirmed-link lifecycle
-│   ├── federation/                   # LD-15–LD-19 multi-instance coordination
+│   ├── federation/                   # LD-15, LD-17–LD-19 spoke-side + shared wire type; imported by cmd/topology-exporter
 │   │   ├── payload.go                # SpokePayload shared wire type
-│   │   ├── hub.go                    # push receiver, spoke-edge store, reconcile trigger
 │   │   └── spoke.go                  # pushes graph to hub after each cycle
+│   ├── federationhub/                # LD-16, LD-18–LD-20 hub aggregation + HA; imported ONLY by cmd/topology-hub
+│   │   ├── hub.go                    # push receiver, spoke-edge store, reconcile trigger
+│   │   ├── hub_merge.go               # combined-graph construction, cross-boundary matching
+│   │   ├── hub_push.go                # /spoke/push HTTP handling + reject contract
+│   │   └── elector_k8s.go             # k8s.io/client-go Lease-based HA leader election (issue #71) — the only
+│   │                                   # place this dependency is imported anywhere in the module
 │   └── discovery/
 │       ├── discovery.go              # shared Device / Edge / OutOfScopeNeighbour types + interfaces
 │       ├── snmp/                     # SYSTEM group walk (RFC 3418)
@@ -51,6 +58,8 @@ Four operational commitments:
 ├── config/example.yaml               # documented configuration schema
 └── docs/operator/                    # runbooks
 ```
+
+`internal/federation` and `internal/federationhub` used to be one package (`internal/federation`, including the hub). They were split along the `cmd/` boundary — not a build tag, since Go's `internal/` visibility rules require both binaries to stay in this one module (`docs/proposals/core-hub-split.md` §3.1) — so that `cmd/topology-exporter` never links `k8s.io/client-go`: the Kubernetes API client `internal/federationhub/elector_k8s.go` needs for opt-in HA leader election, regardless of `federation.role`, previously shipped in every build. `federation.role: hub` is rejected at startup by `cmd/topology-exporter` with a message pointing at `cmd/topology-hub`; `cmd/topology-hub` rejects every other role the same way. This was a pure repackaging — no behavior change for any role — see the proposal doc for the full before/after accounting.
 
 ## Discovery cycle
 
@@ -132,6 +141,8 @@ This is a well-characterised structural problem. RFC 5441 (BRPC Procedure, Vasse
 **LD-16: Hub/spoke mode — push transport, not pull.**
 
 `federation.role: hub` / `federation.role: spoke` configures a hierarchical aggregation following the H-PCE architecture (RFC 6805, King and Farrel, IETF 2012; extended by RFC 8685, Dhody et al., IETF 2019). Spokes push their discovery results to the hub after each cycle; the hub aggregates, reconciles across all spoke domains, and emits the unified graph as Prometheus metrics. Transport is push for three reasons: BGP-LS (RFC 7752), stateful H-PCE (RFC 8751), and every SDN controller federation reviewed (ONOS, OpenDaylight) use push uniformly; push does not require the hub to know spoke addresses in advance, reducing configuration surface; and push communicates cycle completion directly — the hub knows a spoke's data is current because the spoke said so, not because the hub polled at a moment that may fall mid-cycle. The hub is a pure aggregator: it does no local SNMP discovery. This matches the H-PCE parent PCE model and avoids making the hub a bottleneck on both the aggregation and discovery paths.
+
+`role: spoke` runs inside `cmd/topology-exporter`, same as `standalone`/`uncoordinated`. `role: hub` runs in a separate binary, `cmd/topology-hub` (`internal/federationhub`): operators running a hub switch to that binary/image instead of setting `federation.role: hub` on `cmd/topology-exporter`, which now rejects that role at startup with a pointer to `cmd/topology-hub`. This is a deployment-shape change, not a behavior change — `cmd/topology-hub` ships every capability `role: hub` had before the split, including the opt-in native-HA leader election below, verbatim.
 
 **LD-17: Spoke pre-reconciles before pushing.**
 

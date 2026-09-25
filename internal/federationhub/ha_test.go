@@ -1,4 +1,4 @@
-package federation
+package federationhub
 
 import (
 	"bytes"
@@ -12,6 +12,7 @@ import (
 
 	"github.com/grafana/network-topology-exporter/internal/config"
 	"github.com/grafana/network-topology-exporter/internal/discovery"
+	"github.com/grafana/network-topology-exporter/internal/federation"
 	"github.com/grafana/network-topology-exporter/internal/metrics"
 	"github.com/grafana/network-topology-exporter/internal/snapshot"
 )
@@ -86,7 +87,7 @@ func TestEvictionGatedOnLeadership(t *testing.T) {
 
 		h.mu.Lock()
 		h.spokes["dc-a"] = spokeEntry{
-			payload:  SpokePayload{SpokeID: "dc-a"},
+			payload:  federation.SpokePayload{SpokeID: "dc-a"},
 			lastSeen: time.Now().Add(-time.Second), // already expired
 		}
 		h.mu.Unlock()
@@ -113,7 +114,7 @@ func TestEvictionGatedOnLeadership(t *testing.T) {
 		// NewHub defaults isLeader=true (single-hub mode).
 		h.mu.Lock()
 		h.spokes["dc-a"] = spokeEntry{
-			payload:  SpokePayload{SpokeID: "dc-a"},
+			payload:  federation.SpokePayload{SpokeID: "dc-a"},
 			lastSeen: time.Now().Add(-time.Second), // already expired
 		}
 		h.mu.Unlock()
@@ -156,7 +157,7 @@ func TestFailoverTakeover(t *testing.T) {
 	leader.SetLeader(true)
 	follower.SetLeader(false)
 	pushCode := func(h *Hub) int {
-		body, _ := json.Marshal(SpokePayload{SpokeID: "dc-1", CycleAt: time.Now(), Devices: []discovery.Device{{ID: "d1"}}})
+		body, _ := json.Marshal(federation.SpokePayload{SpokeID: "dc-1", CycleAt: time.Now(), Devices: []discovery.Device{{ID: "d1"}}})
 		rec := httptest.NewRecorder()
 		h.handlePush(rec, httptest.NewRequest(http.MethodPost, "/spoke/push", bytes.NewReader(body)))
 		return rec.Code
@@ -209,7 +210,7 @@ func TestNoSplitBrainInvariant(t *testing.T) {
 	go b.runSnapshotWriter(ctx)
 
 	pushCode := func(h *Hub) int {
-		body, _ := json.Marshal(SpokePayload{SpokeID: "dc-1", CycleAt: time.Now(), Devices: []discovery.Device{{ID: "d1"}}})
+		body, _ := json.Marshal(federation.SpokePayload{SpokeID: "dc-1", CycleAt: time.Now(), Devices: []discovery.Device{{ID: "d1"}}})
 		rec := httptest.NewRecorder()
 		h.handlePush(rec, httptest.NewRequest(http.MethodPost, "/spoke/push", bytes.NewReader(body)))
 		return rec.Code
@@ -293,7 +294,7 @@ func TestSingleHubRegression(t *testing.T) {
 		t.Fatal("single-hub must not be ready before firstLive")
 	}
 
-	body, _ := json.Marshal(SpokePayload{SpokeID: "dc-1", CycleAt: time.Now(), Devices: []discovery.Device{{ID: "d1"}}})
+	body, _ := json.Marshal(federation.SpokePayload{SpokeID: "dc-1", CycleAt: time.Now(), Devices: []discovery.Device{{ID: "d1"}}})
 	rec := httptest.NewRecorder()
 	h.handlePush(rec, httptest.NewRequest(http.MethodPost, "/spoke/push", bytes.NewReader(body)))
 	if rec.Code == http.StatusServiceUnavailable {
@@ -314,7 +315,7 @@ func TestSingleHubRegression(t *testing.T) {
 func TestHandlePush503WhenNotLeader(t *testing.T) {
 	h := NewHub(config.FederationConfig{SpokeTimeout: time.Hour}, metrics.New(false), nil, "")
 	h.SetLeader(false)
-	body, _ := json.Marshal(SpokePayload{SpokeID: "dc-x", CycleAt: time.Now(), Devices: []discovery.Device{{ID: "d1"}}})
+	body, _ := json.Marshal(federation.SpokePayload{SpokeID: "dc-x", CycleAt: time.Now(), Devices: []discovery.Device{{ID: "d1"}}})
 	rec := httptest.NewRecorder()
 	h.handlePush(rec, httptest.NewRequest(http.MethodPost, "/spoke/push", bytes.NewReader(body)))
 	if rec.Code != http.StatusServiceUnavailable {

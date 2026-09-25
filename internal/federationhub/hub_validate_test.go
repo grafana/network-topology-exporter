@@ -1,4 +1,4 @@
-package federation
+package federationhub
 
 // Tests split from hub_test.go (#168); see hub_validate.go.
 import (
@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/grafana/network-topology-exporter/internal/discovery"
+	"github.com/grafana/network-topology-exporter/internal/federation"
 	"github.com/grafana/network-topology-exporter/internal/limits"
 	"github.com/grafana/network-topology-exporter/internal/metrics"
 )
@@ -24,40 +25,40 @@ func TestValidateSpokePayload(t *testing.T) {
 
 	cases := []struct {
 		name    string
-		payload SpokePayload
+		payload federation.SpokePayload
 		wantErr bool
 	}{
 		{
 			name: "empty device ID",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{{ID: ""}},
 			},
 			wantErr: true,
 		},
 		{
 			name: "overlong device ID (257 bytes)",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{{ID: strings.Repeat("a", 257)}},
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid UTF-8 device ID",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{{ID: "\xff\xfe"}},
 			},
 			wantErr: true,
 		},
 		{
 			name: "duplicate device IDs",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{{ID: "sw-dup"}, {ID: "sw-dup"}},
 			},
 			wantErr: true,
 		},
 		{
 			name: "empty src_device",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{validDevice},
 				Edges: []discovery.Edge{
 					{SrcDevice: "", SrcPort: "Gi0/1", DstDevice: "sw-2"},
@@ -67,7 +68,7 @@ func TestValidateSpokePayload(t *testing.T) {
 		},
 		{
 			name: "empty src_port",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{validDevice},
 				Edges: []discovery.Edge{
 					{SrcDevice: "sw-1", SrcPort: "", DstDevice: "sw-2"},
@@ -77,7 +78,7 @@ func TestValidateSpokePayload(t *testing.T) {
 		},
 		{
 			name: "empty dst_device",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{validDevice},
 				Edges: []discovery.Edge{
 					{SrcDevice: "sw-1", SrcPort: "Gi0/1", DstDevice: ""},
@@ -87,7 +88,7 @@ func TestValidateSpokePayload(t *testing.T) {
 		},
 		{
 			name: "self-edge (src_device == dst_device)",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{validDevice},
 				Edges: []discovery.Edge{
 					{SrcDevice: "sw-1", SrcPort: "Gi0/1", DstDevice: "sw-1", DstPort: "Gi0/2"},
@@ -97,7 +98,7 @@ func TestValidateSpokePayload(t *testing.T) {
 		},
 		{
 			name: "overlong src_port",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{validDevice},
 				Edges: []discovery.Edge{
 					{SrcDevice: "sw-1", SrcPort: strings.Repeat("p", 257), DstDevice: "sw-2"},
@@ -107,7 +108,7 @@ func TestValidateSpokePayload(t *testing.T) {
 		},
 		{
 			name: "valid minimal payload (one device, one valid edge)",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{validDevice},
 				Edges:   []discovery.Edge{validEdge},
 			},
@@ -115,7 +116,7 @@ func TestValidateSpokePayload(t *testing.T) {
 		},
 		{
 			name: "valid payload with empty DstPort (DstPort is optional)",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{validDevice},
 				Edges: []discovery.Edge{
 					{SrcDevice: "sw-1", SrcPort: "Gi0/1", DstDevice: "sw-2", DstPort: ""},
@@ -142,7 +143,7 @@ func TestValidateSpokePayload(t *testing.T) {
 // returns an error when a Device's Labels map contains an empty string key.
 // An empty label key would produce an invalid Prometheus label at emit time.
 func TestValidateSpokePayloadRejectsEmptyLabelKey(t *testing.T) {
-	payload := SpokePayload{
+	payload := federation.SpokePayload{
 		Devices: []discovery.Device{
 			{
 				ID:     "sw-1",
@@ -178,84 +179,84 @@ func TestValidateSpokePayloadRejectsLabelInjection(t *testing.T) {
 
 	cases := []struct {
 		name       string
-		payload    SpokePayload
+		payload    federation.SpokePayload
 		wantReason metrics.RejectReason
 	}{
 		{
 			name:       "device label key with newline",
-			payload:    SpokePayload{Devices: []discovery.Device{deviceWithLabel("bad\nkey", "v")}},
+			payload:    federation.SpokePayload{Devices: []discovery.Device{deviceWithLabel("bad\nkey", "v")}},
 			wantReason: rejectReasonInvalidLabelKey,
 		},
 		{
 			name:       "device label key with control char (tab)",
-			payload:    SpokePayload{Devices: []discovery.Device{deviceWithLabel("bad\tkey", "v")}},
+			payload:    federation.SpokePayload{Devices: []discovery.Device{deviceWithLabel("bad\tkey", "v")}},
 			wantReason: rejectReasonInvalidLabelKey,
 		},
 		{
 			name:       "device label key with NUL byte",
-			payload:    SpokePayload{Devices: []discovery.Device{deviceWithLabel("bad\x00key", "v")}},
+			payload:    federation.SpokePayload{Devices: []discovery.Device{deviceWithLabel("bad\x00key", "v")}},
 			wantReason: rejectReasonInvalidLabelKey,
 		},
 		{
 			name:       "device label key reserved double-underscore prefix",
-			payload:    SpokePayload{Devices: []discovery.Device{deviceWithLabel("__name", "v")}},
+			payload:    federation.SpokePayload{Devices: []discovery.Device{deviceWithLabel("__name", "v")}},
 			wantReason: rejectReasonInvalidLabelKey,
 		},
 		{
 			name:       "device label key with space",
-			payload:    SpokePayload{Devices: []discovery.Device{deviceWithLabel("bad key", "v")}},
+			payload:    federation.SpokePayload{Devices: []discovery.Device{deviceWithLabel("bad key", "v")}},
 			wantReason: rejectReasonInvalidLabelKey,
 		},
 		{
 			name:       "device label key with double-quote",
-			payload:    SpokePayload{Devices: []discovery.Device{deviceWithLabel(`bad"key`, "v")}},
+			payload:    federation.SpokePayload{Devices: []discovery.Device{deviceWithLabel(`bad"key`, "v")}},
 			wantReason: rejectReasonInvalidLabelKey,
 		},
 		{
 			name:       "device label key with colon",
-			payload:    SpokePayload{Devices: []discovery.Device{deviceWithLabel("bad:key", "v")}},
+			payload:    federation.SpokePayload{Devices: []discovery.Device{deviceWithLabel("bad:key", "v")}},
 			wantReason: rejectReasonInvalidLabelKey,
 		},
 		{
 			name:       "device label key starting with digit",
-			payload:    SpokePayload{Devices: []discovery.Device{deviceWithLabel("9bad", "v")}},
+			payload:    federation.SpokePayload{Devices: []discovery.Device{deviceWithLabel("9bad", "v")}},
 			wantReason: rejectReasonInvalidLabelKey,
 		},
 		{
 			name:       "device label key with hyphen",
-			payload:    SpokePayload{Devices: []discovery.Device{deviceWithLabel("bad-key", "v")}},
+			payload:    federation.SpokePayload{Devices: []discovery.Device{deviceWithLabel("bad-key", "v")}},
 			wantReason: rejectReasonInvalidLabelKey,
 		},
 		{
 			name:       "device label value with newline",
-			payload:    SpokePayload{Devices: []discovery.Device{deviceWithLabel("k", "v\ninjected")}},
+			payload:    federation.SpokePayload{Devices: []discovery.Device{deviceWithLabel("k", "v\ninjected")}},
 			wantReason: rejectReasonInvalidLabelValue,
 		},
 		{
 			name:       "device label value with NUL byte",
-			payload:    SpokePayload{Devices: []discovery.Device{deviceWithLabel("k", "v\x00injected")}},
+			payload:    federation.SpokePayload{Devices: []discovery.Device{deviceWithLabel("k", "v\x00injected")}},
 			wantReason: rejectReasonInvalidLabelValue,
 		},
 		{
 			name:       "device label value with carriage return",
-			payload:    SpokePayload{Devices: []discovery.Device{deviceWithLabel("k", "v\rinjected")}},
+			payload:    federation.SpokePayload{Devices: []discovery.Device{deviceWithLabel("k", "v\rinjected")}},
 			wantReason: rejectReasonInvalidLabelValue,
 		},
 		{
 			name:       "device label value with control char (DEL)",
-			payload:    SpokePayload{Devices: []discovery.Device{deviceWithLabel("k", "v\x7fbad")}},
+			payload:    federation.SpokePayload{Devices: []discovery.Device{deviceWithLabel("k", "v\x7fbad")}},
 			wantReason: rejectReasonInvalidLabelValue,
 		},
 		{
 			name: "device vendor field with newline",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{{ID: "sw-1", Vendor: "Cisco\nrogue"}},
 			},
 			wantReason: rejectReasonInvalidLabelValue,
 		},
 		{
 			name: "edge src_port with newline",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{{ID: "sw-1"}, {ID: "sw-2"}},
 				Edges: []discovery.Edge{{
 					SrcDevice: "sw-1", SrcPort: "Gi0/1\ninjected",
@@ -266,7 +267,7 @@ func TestValidateSpokePayloadRejectsLabelInjection(t *testing.T) {
 		},
 		{
 			name: "edge dst_port with NUL byte",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{{ID: "sw-1"}, {ID: "sw-2"}},
 				Edges: []discovery.Edge{{
 					SrcDevice: "sw-1", SrcPort: "Gi0/1",
@@ -277,7 +278,7 @@ func TestValidateSpokePayloadRejectsLabelInjection(t *testing.T) {
 		},
 		{
 			name: "edge discovery_proto with control char",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{{ID: "sw-1"}, {ID: "sw-2"}},
 				Edges: []discovery.Edge{{
 					SrcDevice: "sw-1", SrcPort: "Gi0/1",
@@ -289,7 +290,7 @@ func TestValidateSpokePayloadRejectsLabelInjection(t *testing.T) {
 		},
 		{
 			name: "oos reporting_device with newline",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				OutOfScope: []discovery.OutOfScopeNeighbour{{
 					ReportingDevice: "sw-a\ninjected",
 					ReportingPort:   "Gi0/1",
@@ -301,7 +302,7 @@ func TestValidateSpokePayloadRejectsLabelInjection(t *testing.T) {
 		},
 		{
 			name: "oos neighbour_hint with NUL byte",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				OutOfScope: []discovery.OutOfScopeNeighbour{{
 					ReportingDevice: "sw-a",
 					ReportingPort:   "Gi0/1",
@@ -313,7 +314,7 @@ func TestValidateSpokePayloadRejectsLabelInjection(t *testing.T) {
 		},
 		{
 			name: "oos proto with newline",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				OutOfScope: []discovery.OutOfScopeNeighbour{{
 					ReportingDevice: "sw-a",
 					ReportingPort:   "Gi0/1",
@@ -359,42 +360,42 @@ func TestValidateSpokePayloadRejectsEdgeMetadataInjection(t *testing.T) {
 
 	cases := []struct {
 		name       string
-		payload    SpokePayload
+		payload    federation.SpokePayload
 		wantReason metrics.RejectReason
 	}{
 		{
 			name:       "metadata key with newline",
-			payload:    SpokePayload{Edges: []discovery.Edge{edgeWithMetadata("bad\nkey", "v")}},
+			payload:    federation.SpokePayload{Edges: []discovery.Edge{edgeWithMetadata("bad\nkey", "v")}},
 			wantReason: rejectReasonInvalidLabelKey,
 		},
 		{
 			name:       "metadata key with NUL",
-			payload:    SpokePayload{Edges: []discovery.Edge{edgeWithMetadata("bad\x00key", "v")}},
+			payload:    federation.SpokePayload{Edges: []discovery.Edge{edgeWithMetadata("bad\x00key", "v")}},
 			wantReason: rejectReasonInvalidLabelKey,
 		},
 		{
 			name:       "metadata key exceeds size cap",
-			payload:    SpokePayload{Edges: []discovery.Edge{edgeWithMetadata(strings.Repeat("k", 257), "v")}},
+			payload:    federation.SpokePayload{Edges: []discovery.Edge{edgeWithMetadata(strings.Repeat("k", 257), "v")}},
 			wantReason: rejectReasonInvalidLabelKey,
 		},
 		{
 			name:       "metadata key empty",
-			payload:    SpokePayload{Edges: []discovery.Edge{edgeWithMetadata("", "v")}},
+			payload:    federation.SpokePayload{Edges: []discovery.Edge{edgeWithMetadata("", "v")}},
 			wantReason: rejectReasonInvalidLabelKey,
 		},
 		{
 			name:       "metadata value with newline",
-			payload:    SpokePayload{Edges: []discovery.Edge{edgeWithMetadata("k", "good\nbad")}},
+			payload:    federation.SpokePayload{Edges: []discovery.Edge{edgeWithMetadata("k", "good\nbad")}},
 			wantReason: rejectReasonInvalidLabelValue,
 		},
 		{
 			name:       "metadata value with NUL",
-			payload:    SpokePayload{Edges: []discovery.Edge{edgeWithMetadata("k", "good\x00bad")}},
+			payload:    federation.SpokePayload{Edges: []discovery.Edge{edgeWithMetadata("k", "good\x00bad")}},
 			wantReason: rejectReasonInvalidLabelValue,
 		},
 		{
 			name:       "metadata value exceeds size cap",
-			payload:    SpokePayload{Edges: []discovery.Edge{edgeWithMetadata("k", strings.Repeat("a", 4097))}},
+			payload:    federation.SpokePayload{Edges: []discovery.Edge{edgeWithMetadata("k", strings.Repeat("a", 4097))}},
 			wantReason: rejectReasonInvalidLabelValue,
 		},
 	}
@@ -432,7 +433,7 @@ func TestValidateSpokePayloadAcceptsValidEdgeMetadata(t *testing.T) {
 			"normal_with_utf8": "São Paulo",
 		},
 	}
-	if err := validateSpokePayload(SpokePayload{Edges: []discovery.Edge{edge}}); err != nil {
+	if err := validateSpokePayload(federation.SpokePayload{Edges: []discovery.Edge{edge}}); err != nil {
 		t.Errorf("expected accept for valid metadata, got: %v", err)
 	}
 }
@@ -445,11 +446,11 @@ func TestValidateSpokePayloadAcceptsValidEdgeMetadata(t *testing.T) {
 func TestValidateSpokePayloadAcceptsValidLabels(t *testing.T) {
 	cases := []struct {
 		name    string
-		payload SpokePayload
+		payload federation.SpokePayload
 	}{
 		{
 			name: "label key with single underscore prefix",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{{
 					ID:     "sw-1",
 					Labels: map[string]string{"_internal": "ok"},
@@ -458,7 +459,7 @@ func TestValidateSpokePayloadAcceptsValidLabels(t *testing.T) {
 		},
 		{
 			name: "label key snake_case",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{{
 					ID:     "sw-1",
 					Labels: map[string]string{"datacenter_region": "us-east-1"},
@@ -467,7 +468,7 @@ func TestValidateSpokePayloadAcceptsValidLabels(t *testing.T) {
 		},
 		{
 			name: "label key with trailing digits",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{{
 					ID:     "sw-1",
 					Labels: map[string]string{"tier3": "edge"},
@@ -476,7 +477,7 @@ func TestValidateSpokePayloadAcceptsValidLabels(t *testing.T) {
 		},
 		{
 			name: "label value with allowed UTF-8 (non-ASCII, no controls)",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{{
 					ID:     "sw-1",
 					Labels: map[string]string{"site": "São Paulo"},
@@ -485,7 +486,7 @@ func TestValidateSpokePayloadAcceptsValidLabels(t *testing.T) {
 		},
 		{
 			name: "label value containing quotes and backslashes (escaped at emit time)",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{{
 					ID:     "sw-1",
 					Labels: map[string]string{"note": `contains "quotes" and \backslash`},
@@ -494,7 +495,7 @@ func TestValidateSpokePayloadAcceptsValidLabels(t *testing.T) {
 		},
 		{
 			name: "valid vendor and site inventory fields",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{{
 					ID: "sw-1", Vendor: "Cisco", Model: "Catalyst-9300",
 					OSVersion: "17.6.4", Site: "dc-a",
@@ -523,27 +524,27 @@ func TestValidateSpokePayloadAcceptsValidLabels(t *testing.T) {
 func TestValidateSpokePayloadStructuralTypedReason(t *testing.T) {
 	cases := []struct {
 		name    string
-		payload SpokePayload
+		payload federation.SpokePayload
 	}{
 		{
 			name:    "empty device_id",
-			payload: SpokePayload{Devices: []discovery.Device{{ID: ""}}},
+			payload: federation.SpokePayload{Devices: []discovery.Device{{ID: ""}}},
 		},
 		{
 			name:    "oversize device_id",
-			payload: SpokePayload{Devices: []discovery.Device{{ID: strings.Repeat("a", limits.MaxDeviceIDBytes+1)}}},
+			payload: federation.SpokePayload{Devices: []discovery.Device{{ID: strings.Repeat("a", limits.MaxDeviceIDBytes+1)}}},
 		},
 		{
 			name:    "invalid utf-8 device_id",
-			payload: SpokePayload{Devices: []discovery.Device{{ID: "\xff\xfe"}}},
+			payload: federation.SpokePayload{Devices: []discovery.Device{{ID: "\xff\xfe"}}},
 		},
 		{
 			name:    "duplicate device_id",
-			payload: SpokePayload{Devices: []discovery.Device{{ID: "sw-1"}, {ID: "sw-1"}}},
+			payload: federation.SpokePayload{Devices: []discovery.Device{{ID: "sw-1"}, {ID: "sw-1"}}},
 		},
 		{
 			name: "self-edge",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{{ID: "sw-1"}},
 				Edges: []discovery.Edge{{
 					SrcDevice: "sw-1", SrcPort: "Gi0/1",
@@ -553,7 +554,7 @@ func TestValidateSpokePayloadStructuralTypedReason(t *testing.T) {
 		},
 		{
 			name: "empty edge src_device",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{{ID: "sw-1"}, {ID: "sw-2"}},
 				Edges: []discovery.Edge{{
 					SrcDevice: "", SrcPort: "Gi0/1",
@@ -563,7 +564,7 @@ func TestValidateSpokePayloadStructuralTypedReason(t *testing.T) {
 		},
 		{
 			name: "oversize edge src_port",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{{ID: "sw-1"}, {ID: "sw-2"}},
 				Edges: []discovery.Edge{{
 					SrcDevice: "sw-1", SrcPort: strings.Repeat("p", limits.MaxPortNameBytes+1),
@@ -573,7 +574,7 @@ func TestValidateSpokePayloadStructuralTypedReason(t *testing.T) {
 		},
 		{
 			name: "invalid utf-8 edge src_port",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				Devices: []discovery.Device{{ID: "sw-1"}, {ID: "sw-2"}},
 				Edges: []discovery.Edge{{
 					SrcDevice: "sw-1", SrcPort: "\xff\xfe",
@@ -583,7 +584,7 @@ func TestValidateSpokePayloadStructuralTypedReason(t *testing.T) {
 		},
 		{
 			name: "oversize OOS reporting_device",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				OutOfScope: []discovery.OutOfScopeNeighbour{{
 					ReportingDevice: strings.Repeat("d", limits.MaxPortNameBytes+1),
 				}},
@@ -615,7 +616,7 @@ func TestValidateSpokePayloadStructuralTypedReason(t *testing.T) {
 // empty key escape with a generic 400 and break dashboards that branch on
 // the reason enum.
 func TestValidateSpokePayloadRejectsEmptyLabelKeyTypedReason(t *testing.T) {
-	payload := SpokePayload{
+	payload := federation.SpokePayload{
 		Devices: []discovery.Device{{
 			ID:     "sw-1",
 			Labels: map[string]string{"": "value"},

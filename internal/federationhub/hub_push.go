@@ -1,4 +1,4 @@
-package federation
+package federationhub
 
 // /spoke/push HTTP handling: payload decode, validation routing, identity
 // binding, rate limiting, and the structured reject contract. Split from
@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
 
+	"github.com/grafana/network-topology-exporter/internal/federation"
 	"github.com/grafana/network-topology-exporter/internal/metrics"
 	"github.com/grafana/network-topology-exporter/internal/tracing"
 )
@@ -143,7 +144,7 @@ func (h *Hub) handlePush(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var payload SpokePayload
+	var payload federation.SpokePayload
 	dec := json.NewDecoder(body)
 	if err := dec.Decode(&payload); err != nil {
 		h.logger.Warn("hub: malformed spoke payload", "error", err)

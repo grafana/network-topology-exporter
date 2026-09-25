@@ -1,4 +1,4 @@
-package federation
+package federationhub
 
 // Tests split from hub_test.go (#168); see hub_eviction.go.
 import (
@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/grafana/network-topology-exporter/internal/config"
+	"github.com/grafana/network-topology-exporter/internal/federation"
 	"github.com/grafana/network-topology-exporter/internal/metrics"
 )
 
@@ -20,11 +21,11 @@ func TestHubEvictionRemovesStaleSpoke(t *testing.T) {
 
 	h.mu.Lock()
 	h.spokes["dc-a"] = spokeEntry{
-		payload:  SpokePayload{SpokeID: "dc-a"},
+		payload:  federation.SpokePayload{SpokeID: "dc-a"},
 		lastSeen: time.Now().Add(-200 * time.Millisecond), // already expired
 	}
 	h.spokes["dc-b"] = spokeEntry{
-		payload:  SpokePayload{SpokeID: "dc-b"},
+		payload:  federation.SpokePayload{SpokeID: "dc-b"},
 		lastSeen: time.Now(), // fresh
 	}
 	h.mu.Unlock()
@@ -63,7 +64,7 @@ func TestHubConcurrentPushAndEviction(t *testing.T) {
 			id := fmt.Sprintf("dc-%d", n%3)
 			h.mu.Lock()
 			h.spokes[id] = spokeEntry{
-				payload:  SpokePayload{SpokeID: id},
+				payload:  federation.SpokePayload{SpokeID: id},
 				lastSeen: time.Now(),
 			}
 			combined := h.combinedGraphLocked()
@@ -103,7 +104,7 @@ func TestHubEvictionDeletesGaugeLabels(t *testing.T) {
 
 	h.mu.Lock()
 	h.spokes["dc-evict"] = spokeEntry{
-		payload:  SpokePayload{SpokeID: "dc-evict"},
+		payload:  federation.SpokePayload{SpokeID: "dc-evict"},
 		lastSeen: time.Now().Add(-200 * time.Millisecond), // already expired
 	}
 	h.mu.Unlock()
@@ -139,7 +140,7 @@ func TestHubRunEvictionViaGoroutine(t *testing.T) {
 
 	h.mu.Lock()
 	h.spokes["dc-old"] = spokeEntry{
-		payload:  SpokePayload{SpokeID: "dc-old"},
+		payload:  federation.SpokePayload{SpokeID: "dc-old"},
 		lastSeen: time.Now().Add(-100 * time.Millisecond),
 	}
 	h.mu.Unlock()
@@ -188,7 +189,7 @@ func TestHubRunEvictionFiresTickerEviction(t *testing.T) {
 
 	h.mu.Lock()
 	h.spokes["dc-expire"] = spokeEntry{
-		payload:  SpokePayload{SpokeID: "dc-expire"},
+		payload:  federation.SpokePayload{SpokeID: "dc-expire"},
 		lastSeen: time.Now().Add(-50 * time.Millisecond),
 	}
 	h.mu.Unlock()

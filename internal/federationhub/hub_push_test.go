@@ -1,4 +1,4 @@
-package federation
+package federationhub
 
 // Tests split from hub_test.go (#168); see hub_push.go.
 import (
@@ -19,6 +19,7 @@ import (
 
 	"github.com/grafana/network-topology-exporter/internal/config"
 	"github.com/grafana/network-topology-exporter/internal/discovery"
+	"github.com/grafana/network-topology-exporter/internal/federation"
 	"github.com/grafana/network-topology-exporter/internal/limits"
 	"github.com/grafana/network-topology-exporter/internal/metrics"
 )
@@ -40,7 +41,7 @@ func TestHubHandlePushRejectsBadSpokeID(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			payload := SpokePayload{
+			payload := federation.SpokePayload{
 				SpokeID: tc.spokeID,
 				CycleAt: time.Now(),
 			}
@@ -68,7 +69,7 @@ func TestHubHandlePushSuccessStoresSpokeAndSetsGauges(t *testing.T) {
 		m, nil, "",
 	)
 
-	payload := SpokePayload{
+	payload := federation.SpokePayload{
 		SpokeID: "dc-valid",
 		CycleAt: time.Now(),
 		Devices: []discovery.Device{{ID: "sw-1"}},
@@ -136,7 +137,7 @@ func TestHubHandlePushRejectsStaleCycleAt(t *testing.T) {
 	h := newTestHub(nil)
 	h.cfg.SpokeTimeout = time.Minute
 
-	payload := SpokePayload{
+	payload := federation.SpokePayload{
 		SpokeID: "dc-stale",
 		CycleAt: time.Now().Add(-2 * time.Minute), // older than spoke_timeout
 	}
@@ -160,7 +161,7 @@ func TestHubHandlePushRejectsStaleCycleAt(t *testing.T) {
 func TestHubHandlePushMissingCycleAt(t *testing.T) {
 	h := newTestHub(nil)
 
-	payload := SpokePayload{SpokeID: "dc-no-time"} // CycleAt is zero
+	payload := federation.SpokePayload{SpokeID: "dc-no-time"} // CycleAt is zero
 	body, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
@@ -181,7 +182,7 @@ func TestHubHandlePushMissingCycleAt(t *testing.T) {
 func TestHubHandlePushRejectsFutureCycleAt(t *testing.T) {
 	h := newTestHub(nil)
 
-	payload := SpokePayload{
+	payload := federation.SpokePayload{
 		SpokeID: "dc-future",
 		CycleAt: time.Now().Add(10 * time.Minute),
 	}
@@ -205,7 +206,7 @@ func TestHubHandlePushRejectsFutureCycleAt(t *testing.T) {
 func TestHubHandlePushRejectsEmptySpokeID(t *testing.T) {
 	h := newTestHub(nil)
 
-	payload := SpokePayload{SpokeID: "", CycleAt: time.Now()}
+	payload := federation.SpokePayload{SpokeID: "", CycleAt: time.Now()}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
@@ -228,7 +229,7 @@ func TestHubHandlePushRejectsCertCNMismatch(t *testing.T) {
 	h := newTestHub(nil)
 
 	// Cert has CN "dc-a"; payload claims spoke_id "dc-b" — mismatch.
-	payload := SpokePayload{SpokeID: "dc-b", CycleAt: time.Now()}
+	payload := federation.SpokePayload{SpokeID: "dc-b", CycleAt: time.Now()}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
@@ -252,7 +253,7 @@ func TestHubHandlePushRejectsCertCNMismatch(t *testing.T) {
 func TestHubHandlePushAcceptsCertCNMatch(t *testing.T) {
 	h := newTestHub(nil)
 
-	payload := SpokePayload{SpokeID: "dc-match", CycleAt: time.Now()}
+	payload := federation.SpokePayload{SpokeID: "dc-match", CycleAt: time.Now()}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		t.Fatalf("marshal payload: %v", err)
@@ -282,7 +283,7 @@ func TestHubHandlePushRejectsOversizedPayload(t *testing.T) {
 	for i := range devices {
 		devices[i] = discovery.Device{ID: fmt.Sprintf("sw-%d", i)}
 	}
-	payload := SpokePayload{
+	payload := federation.SpokePayload{
 		SpokeID: "dc-big",
 		CycleAt: time.Now(),
 		Devices: devices,
@@ -322,7 +323,7 @@ func TestHubHandlePushRejectedGraphDoesNotMarkSpokeUp(t *testing.T) {
 	)
 
 	// Build a payload whose edges will exceed MaxGraphEdges after reconciliation.
-	payload := SpokePayload{
+	payload := federation.SpokePayload{
 		SpokeID: "dc-rejected",
 		CycleAt: time.Now(),
 		Devices: []discovery.Device{
@@ -409,7 +410,7 @@ func TestHubHandlePushRejectedGraphLeavesPreviousEntryIntact(t *testing.T) {
 
 	// Seed a prior entry with one device — within the tight edge budget (no edges).
 	prior := spokeEntry{
-		payload: SpokePayload{
+		payload: federation.SpokePayload{
 			SpokeID: "dc-rollback",
 			Devices: []discovery.Device{{ID: "sw-prior"}},
 			Edges:   []discovery.Edge{},
@@ -421,7 +422,7 @@ func TestHubHandlePushRejectedGraphLeavesPreviousEntryIntact(t *testing.T) {
 	h.mu.Unlock()
 
 	// Push a new payload that will exceed MaxGraphEdges.
-	payload := SpokePayload{
+	payload := federation.SpokePayload{
 		SpokeID: "dc-rollback",
 		CycleAt: time.Now(),
 		Devices: []discovery.Device{{ID: "sw-a"}, {ID: "sw-b"}, {ID: "sw-c"}},
@@ -479,7 +480,7 @@ func TestHandlePushRejectedLeavesSpokesUntouched(t *testing.T) {
 		Hub:          config.FederationHubConfig{MaxGraphDevices: 1},
 	}, metrics.New(false), nil, "")
 
-	body, _ := json.Marshal(SpokePayload{
+	body, _ := json.Marshal(federation.SpokePayload{
 		SpokeID: "dc-x",
 		CycleAt: time.Now(),
 		Devices: []discovery.Device{{ID: "d1"}, {ID: "d2"}}, // 2 > MaxGraphDevices=1
@@ -513,7 +514,7 @@ func TestHandlePushConcurrentDifferentSpokes(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			id := fmt.Sprintf("dc-%02d", i)
-			body, _ := json.Marshal(SpokePayload{
+			body, _ := json.Marshal(federation.SpokePayload{
 				SpokeID: id, CycleAt: time.Now(),
 				Devices: []discovery.Device{{ID: id + "-r1"}},
 			})
@@ -558,7 +559,7 @@ func TestHandlePushEvictionRaceInvariant(t *testing.T) {
 	for iter := 0; iter < 200; iter++ {
 		// Seed an aged entry + gauge so eviction is eligible to delete it.
 		h.mu.Lock()
-		h.spokes[id] = spokeEntry{payload: SpokePayload{SpokeID: id}, lastSeen: time.Now().Add(-2 * time.Hour)}
+		h.spokes[id] = spokeEntry{payload: federation.SpokePayload{SpokeID: id}, lastSeen: time.Now().Add(-2 * time.Hour)}
 		h.mu.Unlock()
 		h.m.FederationSpokeUp.WithLabelValues(id).Set(1)
 
@@ -568,7 +569,7 @@ func TestHandlePushEvictionRaceInvariant(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				body, _ := json.Marshal(SpokePayload{SpokeID: id, CycleAt: time.Now(),
+				body, _ := json.Marshal(federation.SpokePayload{SpokeID: id, CycleAt: time.Now(),
 					Devices: []discovery.Device{{ID: "r1"}}})
 				h.handlePush(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/p", bytes.NewReader(body)))
 			}()
@@ -604,12 +605,12 @@ func TestHandlePushEvictionRaceInvariant(t *testing.T) {
 func TestHubHandlePushRejectsLabelInjection(t *testing.T) {
 	cases := []struct {
 		name       string
-		payload    SpokePayload
+		payload    federation.SpokePayload
 		wantReason metrics.RejectReason
 	}{
 		{
 			name: "label key with newline returns invalid_label_key",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				SpokeID: "dc-a",
 				CycleAt: time.Now(),
 				Devices: []discovery.Device{{
@@ -621,7 +622,7 @@ func TestHubHandlePushRejectsLabelInjection(t *testing.T) {
 		},
 		{
 			name: "label key with reserved __ prefix returns invalid_label_key",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				SpokeID: "dc-a",
 				CycleAt: time.Now(),
 				Devices: []discovery.Device{{
@@ -633,7 +634,7 @@ func TestHubHandlePushRejectsLabelInjection(t *testing.T) {
 		},
 		{
 			name: "label value with NUL returns invalid_label_value",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				SpokeID: "dc-a",
 				CycleAt: time.Now(),
 				Devices: []discovery.Device{{
@@ -645,7 +646,7 @@ func TestHubHandlePushRejectsLabelInjection(t *testing.T) {
 		},
 		{
 			name: "edge port with newline returns invalid_label_value",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				SpokeID: "dc-a",
 				CycleAt: time.Now(),
 				Devices: []discovery.Device{{ID: "sw-1"}, {ID: "sw-2"}},
@@ -711,11 +712,11 @@ func TestHubHandlePushRejectsLabelInjection(t *testing.T) {
 func TestHubHandlePushRejectsStructuralInvalid(t *testing.T) {
 	cases := []struct {
 		name    string
-		payload SpokePayload
+		payload federation.SpokePayload
 	}{
 		{
 			name: "empty device_id",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				SpokeID: "dc-a",
 				CycleAt: time.Now(),
 				Devices: []discovery.Device{{ID: ""}},
@@ -723,7 +724,7 @@ func TestHubHandlePushRejectsStructuralInvalid(t *testing.T) {
 		},
 		{
 			name: "duplicate device_id",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				SpokeID: "dc-a",
 				CycleAt: time.Now(),
 				Devices: []discovery.Device{{ID: "sw-1"}, {ID: "sw-1"}},
@@ -731,7 +732,7 @@ func TestHubHandlePushRejectsStructuralInvalid(t *testing.T) {
 		},
 		{
 			name: "self-edge",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				SpokeID: "dc-a",
 				CycleAt: time.Now(),
 				Devices: []discovery.Device{{ID: "sw-1"}},
@@ -743,7 +744,7 @@ func TestHubHandlePushRejectsStructuralInvalid(t *testing.T) {
 		},
 		{
 			name: "empty edge src_device",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				SpokeID: "dc-a",
 				CycleAt: time.Now(),
 				Devices: []discovery.Device{{ID: "sw-1"}, {ID: "sw-2"}},
@@ -755,7 +756,7 @@ func TestHubHandlePushRejectsStructuralInvalid(t *testing.T) {
 		},
 		{
 			name: "oversize src_port",
-			payload: SpokePayload{
+			payload: federation.SpokePayload{
 				SpokeID: "dc-a",
 				CycleAt: time.Now(),
 				Devices: []discovery.Device{{ID: "sw-1"}, {ID: "sw-2"}},
@@ -829,7 +830,7 @@ func gzipBytes(t *testing.T, b []byte) []byte {
 // a gzip-encoded push (the spoke default since the compression change).
 func TestHubHandlePushAcceptsGzipBody(t *testing.T) {
 	h := newTestHub(nil)
-	payload := SpokePayload{
+	payload := federation.SpokePayload{
 		SpokeID: "dc-gzip",
 		CycleAt: time.Now(),
 		Devices: []discovery.Device{{ID: "sw-1"}},

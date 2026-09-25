@@ -1,4 +1,4 @@
-package federation
+package federationhub
 
 // Spoke eviction (LD-18): periodic removal of spokes that have not pushed
 // within federation.spoke_timeout, followed by a rebuild/republish of the

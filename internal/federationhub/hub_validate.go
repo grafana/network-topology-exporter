@@ -1,4 +1,4 @@
-package federation
+package federationhub
 
 // Payload validation: the Prometheus/OpenMetrics line-protocol safety checks
 // and structural invariants applied to every spoke push before it can touch
@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/grafana/network-topology-exporter/internal/federation"
 	"github.com/grafana/network-topology-exporter/internal/limits"
 	"github.com/grafana/network-topology-exporter/internal/metrics"
 )
@@ -126,7 +127,7 @@ func validateMetricLabelString(s string) error {
 // The handlePush *validationError invariant is load-bearing: handlePush panics
 // on any non-*validationError return from this function (issue #19). Every new
 // validation site MUST return newValidationError(...) — never plain fmt.Errorf.
-func validateSpokePayload(p SpokePayload) error {
+func validateSpokePayload(p federation.SpokePayload) error {
 	seen := make(map[string]bool, len(p.Devices))
 	for i, d := range p.Devices {
 		if d.ID == "" {

@@ -1,0 +1,49 @@
+# syntax=docker/dockerfile:1.7
+#
+# Image for cmd/topology-hub (docs/proposals/core-hub-split.md §3): the
+# optional federation-hub binary, split out of the main topology-exporter
+# image so that only THIS image links k8s.io/client-go (needed for the
+# opt-in native-HA leader election). Operators running federation.role: hub
+# switch from network-topology-exporter's image to this one; every other
+# role keeps using Dockerfile unchanged.
+
+# ─── builder ────────────────────────────────────────────────────────────────
+FROM golang:1.26-alpine AS builder
+
+WORKDIR /src
+
+RUN apk add --no-cache git make
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+ARG DATE=unknown
+
+RUN CGO_ENABLED=0 go build -trimpath \
+    -ldflags "-s -w \
+      -X github.com/grafana/network-topology-exporter/internal/version.Version=${VERSION} \
+      -X github.com/grafana/network-topology-exporter/internal/version.Commit=${COMMIT} \
+      -X github.com/grafana/network-topology-exporter/internal/version.BuildDate=${DATE}" \
+    -o /out/topology-hub ./cmd/topology-hub
+
+# ─── runtime ────────────────────────────────────────────────────────────────
+FROM gcr.io/distroless/static-debian12:nonroot
+
+LABEL org.opencontainers.image.title="network-topology-hub"
+LABEL org.opencontainers.image.description="Federation hub for network-topology-exporter: aggregates spoke pushes over mTLS (federation.role: hub)."
+LABEL org.opencontainers.image.licenses="AGPL-3.0-or-later"
+LABEL org.opencontainers.image.source="https://github.com/grafana/network-topology-exporter"
+
+USER nonroot:nonroot
+
+COPY --from=builder /out/topology-hub /usr/local/bin/topology-hub
+COPY config/example.yaml /etc/topology-exporter/config.yaml
+
+EXPOSE 9100
+
+ENTRYPOINT ["/usr/local/bin/topology-hub"]
+CMD ["--config.file=/etc/topology-exporter/config.yaml", "--web.listen-address=:9100"]

@@ -1,4 +1,4 @@
-package federation
+package federationhub
 
 // Tests split from hub_test.go (#168); see hub_snapshot.go.
 import (

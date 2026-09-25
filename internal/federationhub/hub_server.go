@@ -1,4 +1,4 @@
-package federation
+package federationhub
 
 // mTLS federation server bootstrap and lifecycle. Split from hub.go (#168) —
 // same-package move, no behaviour change.

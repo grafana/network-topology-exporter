@@ -21,7 +21,6 @@ import (
 	"github.com/grafana/network-topology-exporter/internal/app/httpx"
 	"github.com/grafana/network-topology-exporter/internal/config"
 	"github.com/grafana/network-topology-exporter/internal/credentials"
-	"github.com/grafana/network-topology-exporter/internal/discovery"
 	snmpwalk "github.com/grafana/network-topology-exporter/internal/discovery/snmp"
 	"github.com/grafana/network-topology-exporter/internal/federation"
 	"github.com/grafana/network-topology-exporter/internal/loglimit"
@@ -29,7 +28,6 @@ import (
 	"github.com/grafana/network-topology-exporter/internal/otelx"
 	"github.com/grafana/network-topology-exporter/internal/output/otlp"
 	yangout "github.com/grafana/network-topology-exporter/internal/output/yang"
-	"github.com/grafana/network-topology-exporter/internal/snapshot"
 	"github.com/grafana/network-topology-exporter/internal/tracing"
 	"github.com/grafana/network-topology-exporter/internal/version"
 )
@@ -69,6 +67,21 @@ func Run(ctx context.Context, args []string) int {
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		logger.Error("loading config failed", "error", err)
+		return 1
+	}
+
+	// federation.role: hub is no longer a supported configuration in this
+	// binary (docs/proposals/core-hub-split.md §3.2). It used to run a pure
+	// aggregator with no local discovery loop via the branch below; that
+	// logic (and the internal/federationhub package, and the k8s.io/client-go
+	// dependency it pulls in for HA leader election) now lives entirely in
+	// cmd/topology-hub, which cmd/topology-exporter never links. Fail fast
+	// here with a clear pointer rather than silently doing nothing, so a
+	// config file written for the old single-binary world doesn't start a
+	// process that never becomes ready.
+	if cfg.Federation.Role == config.RoleHub {
+		logger.Error("federation.role: hub is not supported by this binary; run cmd/topology-hub instead",
+			"config", *configPath)
 		return 1
 	}
 	logger.Info("config loaded",
@@ -187,13 +200,14 @@ func Run(ctx context.Context, args []string) int {
 
 	var workerDone sync.WaitGroup
 
-	// Issue #68: opt-in OpenTelemetry tracing of the discovery cycle. Built
-	// before the role switch so both hub mode (which records hub.handlePush on
-	// the receiving side of a spoke push) and spoke/standalone mode (which
-	// records discovery.cycle and spoke.push) install the same global
-	// TracerProvider + W3C TraceContext propagator. When traces.enabled is
-	// false, no provider is installed and the global tracer stays the OTel
-	// no-op, so all instrumentation is a cheap no-op.
+	// Issue #68: opt-in OpenTelemetry tracing of the discovery cycle. Installs
+	// the global TracerProvider + W3C TraceContext propagator that
+	// spoke/standalone mode uses to record discovery.cycle and spoke.push
+	// (hub mode's matching hub.handlePush span is installed the same way by
+	// cmd/topology-hub, since federation.role: hub no longer runs in this
+	// binary — see the rejection above). When traces.enabled is false, no
+	// provider is installed and the global tracer stays the OTel no-op, so
+	// all instrumentation is a cheap no-op.
 	var traceProvider *tracing.Provider
 	if cfg.Output.OTLP.Traces.Enabled {
 		sampleRate := 0.1
@@ -221,251 +235,103 @@ func Run(ctx context.Context, args []string) int {
 	// output.otlp.enabled is true.
 	pub := NoopOTLPPublisher()
 
-	switch cfg.Federation.Role {
-	case config.RoleHub:
-		// Hub mode: pure aggregator — no local SNMP discovery. The hub server
-		// exposes /spoke/push on a separate mTLS listener (LD-20).
-		hub := federation.NewHub(cfg.Federation, m, logger, cfg.Snapshot.Path)
-
-		// LD-13: load snapshot so the hub can serve stale-but-valid metrics
-		// (GraphStale=1) until the first live spoke push arrives.
-		m.GraphStale.Set(1)
-		hubSnap, err := snapshot.Load(cfg.Snapshot.Path)
+	// federation.role is standalone, uncoordinated, or spoke at this point
+	// (hub was rejected above). This used to be the "default" arm of a
+	// switch on cfg.Federation.Role; the hub arm moved to cmd/topology-hub
+	// (docs/proposals/core-hub-split.md §3.2), so the switch itself is gone —
+	// this is its unconditional body, unchanged.
+	//
+	// Build the spoke client now so TLS errors surface at startup, not
+	// mid-cycle.
+	var spoke *federation.Spoke
+	if cfg.Federation.Role == config.RoleSpoke {
+		var err error
+		spoke, err = federation.NewSpoke(cfg.Federation, logger, warnLimiter, m)
 		if err != nil {
-			if errors.Is(err, snapshot.ErrVersionMismatch) {
-				logger.Warn("hub snapshot version mismatch, cold start", "path", cfg.Snapshot.Path, "error", err)
-			} else {
-				logger.Warn("hub snapshot load failed, cold start", "path", cfg.Snapshot.Path, "error", err)
-			}
-		}
-		if hubSnap != nil {
-			hub.RestoreGraph(discovery.Graph{
-				Devices:    hubSnap.Devices,
-				Edges:      hubSnap.Edges,
-				OutOfScope: hubSnap.OutOfScope,
-			})
-			logger.Info("hub snapshot loaded", "devices", len(hubSnap.Devices), "edges", len(hubSnap.Edges))
-			m.SnapshotLoadedDevicesTotal.Set(float64(len(hubSnap.Devices)))
-		}
-
-		// In hub mode, readiness is driven by the first live spoke push.
-		isReadyFn = hub.IsReady
-
-		// Issue #71 native HA. ONLY when ha.enabled: construct the k8s lease
-		// elector and drive hub leadership. When disabled this whole block is
-		// skipped — no elector, no in-cluster config attempt, zero k8s API
-		// calls — and the hub stays leader (isLeader defaults true in NewHub),
-		// byte-identical to single-hub mode (the regression gate).
-		if cfg.Federation.Hub.HA.Enabled {
-			ha := cfg.Federation.Hub.HA
-			identity := os.Getenv("POD_NAME")
-			if identity == "" {
-				if host, herr := os.Hostname(); herr == nil {
-					identity = host
-				}
-			}
-			namespace := ha.LeaseNamespace
-			if namespace == "" {
-				namespace = os.Getenv("POD_NAMESPACE")
-			}
-			elector, eerr := federation.NewK8sLeaseElector(federation.K8sElectorConfig{
-				LeaseName:      ha.LeaseName,
-				LeaseNamespace: namespace,
-				Identity:       identity,
-				LeaseDuration:  ha.LeaseDuration,
-				RenewDeadline:  ha.RenewDeadline,
-				RetryPeriod:    ha.RetryPeriod,
-			})
-			if eerr != nil {
-				// Off-cluster (no serviceaccount/kubeconfig) returns a clear
-				// error here, not a panic. Fatal at startup like the other
-				// build-the-client paths in this function.
-				logger.Error("building federation hub HA elector", "error", eerr)
-				return 1
-			}
-
-			// Until elected, the hub is NOT leader: it 503s pushes (with
-			// Connection: close) so spokes route to the actual leader. The
-			// callbacks below flip this.
-			hub.SetLeader(false)
-
-			// Fence-token epoch source (design §4.4). Prefer the Lease's
-			// server-assigned LeaderTransitions, which orders writes across pods.
-			// When NO EpochReader is available (e.g. the fake elector in tests),
-			// fall back to a process-local monotonic counter. When an EpochReader
-			// IS present but a transient CurrentEpoch read ERRORS, retain the
-			// hub's current epoch rather than overwriting it with the local
-			// counter: the server epoch and the local counter live in different
-			// number spaces, so substituting one for the other can DECREASE the
-			// stored epoch and make the snapshot fence refuse this pod's own
-			// writes. The guarantee here is "never decrease": the real-elector
-			// path advances only on a successful read and otherwise holds steady.
-			epochReader, _ := elector.(federation.EpochReader)
-			var localEpoch atomic.Uint64
-
-			workerDone.Add(1)
-			go func() {
-				defer workerDone.Done()
-				defer cancel()
-				defer recoverGoroutine("hub_elector", logger, m)
-				rerr := elector.Run(ctx, federation.LeaderCallbacks{
-					OnStartedLeading: func(c context.Context) {
-						hub.SetLeader(true)
-						if epochReader == nil {
-							// No server epoch available; use the local counter.
-							epoch := localEpoch.Add(1)
-							hub.SetLeaseEpoch(epoch)
-							logger.Info("hub HA: became leader", "identity", identity, "lease_epoch", epoch)
-							return
-						}
-						e, ferr := epochReader.CurrentEpoch(c)
-						if ferr != nil {
-							// Transient read error: keep the existing epoch so we
-							// never go backward. The fence stays at its last value.
-							logger.Warn("hub HA: lease epoch read failed; retaining current epoch",
-								"error", ferr, "current_epoch", hub.LeaseEpoch())
-							logger.Info("hub HA: became leader", "identity", identity, "lease_epoch", hub.LeaseEpoch())
-							return
-						}
-						hub.SetLeaseEpoch(e)
-						logger.Info("hub HA: became leader", "identity", identity, "lease_epoch", e)
-					},
-					OnStoppedLeading: func() {
-						// Step down NOW (design §4.3). The T3 Connection:close
-						// header on the push handler's 503 is the primary
-						// step-down mechanism: a spoke pinned via keep-alive to
-						// this just-demoted leader re-resolves to the new leader
-						// on its next attempt. We deliberately do NOT proactively
-						// close idle push conns here — it adds re-promotion
-						// complexity for no benefit over the header.
-						hub.SetLeader(false)
-						logger.Warn("hub HA: lost leadership; stepping down (503 + Connection:close on pushes)")
-					},
-					OnNewLeader: func(id string) {
-						logger.Info("hub HA: leadership", "leader", id)
-					},
-				})
-				if rerr != nil && ctx.Err() == nil {
-					logger.Error("hub HA elector error", "error", rerr)
-				}
-			}()
-		}
-
-		workerDone.Add(1)
-		go func() {
-			defer workerDone.Done()
-			// Recover a panic in our hub serve/accept body so one bad push
-			// path cannot crash the whole aggregator and lose every spoke's
-			// graph. One-shot: on recovery the goroutine exits (the deferred
-			// workerDone.Done fires) and shutdown proceeds; the process keeps
-			// serving the last-published metrics.
-			// cancel() is registered before recoverGoroutine so it runs AFTER
-			// the recover (defers are LIFO). A recovered hub-serve panic leaves
-			// the listener dead but the goroutine alive; without this the
-			// process kept /readyz ready and /healthz hub-inert, so Kubernetes
-			// never restarted the pod. Treat a recovered panic like a serve
-			// failure: cancel so shutdown/restart proceeds. context.CancelFunc
-			// is idempotent, so the normal-exit double-cancel is harmless.
-			defer cancel()
-			defer recoverGoroutine("hub_serve", logger, m)
-			if err := hub.Serve(ctx); err != nil && ctx.Err() == nil {
-				logger.Error("hub federation server error", "error", err)
-				cancel()
-			}
-		}()
-	default: // standalone, uncoordinated, spoke
-		// Build the spoke client now so TLS errors surface at startup, not
-		// mid-cycle.
-		var spoke *federation.Spoke
-		if cfg.Federation.Role == config.RoleSpoke {
-			var err error
-			spoke, err = federation.NewSpoke(cfg.Federation, logger, warnLimiter, m)
-			if err != nil {
-				logger.Error("building federation spoke", "error", err)
-				return 1
-			}
-		}
-
-		if cfg.Output.OTLP.Enabled {
-			otlpExp, err := otlp.New(ctx, otlp.Config{
-				Endpoint:   cfg.Output.OTLP.Endpoint,
-				Timeout:    cfg.Output.OTLP.Timeout,
-				InstanceID: cfg.Federation.Spoke.SpokeID, // empty in non-spoke roles → falls back to hostname
-				Protocol:   otelx.Protocol(cfg.Output.OTLP.Protocol),
-			})
-			if err != nil {
-				logger.Error("building OTLP exporter", "error", err)
-				return 1
-			}
-			pub = NewOTLPPublisher(otlpExp, MaxOTLPPushConcurrency, logger, m)
-		}
-
-		// Issue #73: admin out-of-cycle re-discovery. cycleMu serialises forced
-		// walks against the regular cycle (shared with LoopConfig.CycleMu).
-		// The Rediscoverer shares ONE credential resolver with the discovery
-		// loop (#169): a sticky-credential win recorded by either path is
-		// reused by the other, and the snapshot hydration the loop performs
-		// benefits admin walks too. Access is serialised by cycleMu, so the
-		// two paths never hit a device concurrently. The endpoint is privileged:
-		// it only runs when listen.web_config_file actually authenticates the
-		// caller (basic_auth_users, or a client-cert-requiring client_auth_type).
-		// A TLS-only web-config encrypts but does NOT authenticate the client, so
-		// it does not enable the endpoint — the handler returns 403.
-		var cycleMu sync.Mutex
-		resolver, err := credentials.New(cfg.Credentials)
-		if err != nil {
-			logger.Error("building credential resolver", "error", err)
+			logger.Error("building federation spoke", "error", err)
 			return 1
 		}
-		allowedNets := snmpwalk.ParseCIDRs(cfg.Discovery.Scope.CIDRAllowList)
-		rediscoverer := NewRediscoverer(cfg, m, logger, resolver, allowedNets, &cycleMu, WebConfigHasClientAuth(cfg.Listen.WebConfigFile))
-		mux.HandleFunc("/admin/rediscover", httpx.NewRediscoverHandler(rediscoverer))
+	}
 
-		// Graph-stale watchdog (ops hardening): re-assert GraphStale=1 when this
-		// running loop wedges. Only started when a local discovery loop runs (the
-		// default branch already excludes hub) AND the liveness gate is enabled
-		// (livenessMaxStale > 0). Joined via workerDone so graceful shutdown waits
-		// for it; it returns on ctx cancellation (no goroutine leak — goleak).
-		if livenessMaxStale > 0 {
-			workerDone.Add(1)
-			go func() {
-				defer workerDone.Done()
-				// Recover a panic in the watchdog so a bug in the staleness
-				// gate cannot crash the process. One-shot: on recovery the
-				// watchdog exits, leaving the /healthz gate to fall back to
-				// the cycle-timestamp check the handler already performs.
-				defer recoverGoroutine("stale_watchdog", logger, m)
-				RunStaleWatchdog(ctx, &status, m, cfg.Discovery.Interval, livenessMaxStale, time.Now)
-			}()
+	if cfg.Output.OTLP.Enabled {
+		otlpExp, err := otlp.New(ctx, otlp.Config{
+			Endpoint:   cfg.Output.OTLP.Endpoint,
+			Timeout:    cfg.Output.OTLP.Timeout,
+			InstanceID: cfg.Federation.Spoke.SpokeID, // empty in non-spoke roles → falls back to hostname
+			Protocol:   otelx.Protocol(cfg.Output.OTLP.Protocol),
+		})
+		if err != nil {
+			logger.Error("building OTLP exporter", "error", err)
+			return 1
 		}
+		pub = NewOTLPPublisher(otlpExp, MaxOTLPPushConcurrency, logger, m)
+	}
 
+	// Issue #73: admin out-of-cycle re-discovery. cycleMu serialises forced
+	// walks against the regular cycle (shared with LoopConfig.CycleMu).
+	// The Rediscoverer shares ONE credential resolver with the discovery
+	// loop (#169): a sticky-credential win recorded by either path is
+	// reused by the other, and the snapshot hydration the loop performs
+	// benefits admin walks too. Access is serialised by cycleMu, so the
+	// two paths never hit a device concurrently. The endpoint is privileged:
+	// it only runs when listen.web_config_file actually authenticates the
+	// caller (basic_auth_users, or a client-cert-requiring client_auth_type).
+	// A TLS-only web-config encrypts but does NOT authenticate the client, so
+	// it does not enable the endpoint — the handler returns 403.
+	var cycleMu sync.Mutex
+	resolver, err := credentials.New(cfg.Credentials)
+	if err != nil {
+		logger.Error("building credential resolver", "error", err)
+		return 1
+	}
+	allowedNets := snmpwalk.ParseCIDRs(cfg.Discovery.Scope.CIDRAllowList)
+	rediscoverer := NewRediscoverer(cfg, m, logger, resolver, allowedNets, &cycleMu, WebConfigHasClientAuth(cfg.Listen.WebConfigFile))
+	mux.HandleFunc("/admin/rediscover", httpx.NewRediscoverHandler(rediscoverer))
+
+	// Graph-stale watchdog (ops hardening): re-assert GraphStale=1 when this
+	// running loop wedges. Only started when a local discovery loop runs (the
+	// default branch already excludes hub) AND the liveness gate is enabled
+	// (livenessMaxStale > 0). Joined via workerDone so graceful shutdown waits
+	// for it; it returns on ctx cancellation (no goroutine leak — goleak).
+	if livenessMaxStale > 0 {
 		workerDone.Add(1)
 		go func() {
 			defer workerDone.Done()
-			// Recover a panic in the discovery scheduler so one wedged
-			// cycle cannot crash the process. Per-cycle work is already
-			// panic-isolated at two finer layers — the per-device probe
-			// recover in cycle.go and the per-cycle recover added inside
-			// RunDiscoveryLoop — so reaching here means the scheduler shell
-			// itself panicked; recover, exit, and let shutdown drain.
-			defer recoverGoroutine("discovery_loop", logger, m)
-			RunDiscoveryLoop(ctx, LoopConfig{
-				Cancel:        cancel,
-				Logger:        logger,
-				WarnLimiter:   warnLimiter,
-				Cfg:           cfg,
-				M:             m,
-				WalkerMetrics: walkerMetrics,
-				Status:        &status,
-				Ready:         &ready,
-				Spoke:         spoke,
-				Otlp:          pub,
-				CycleMu:       &cycleMu,
-				Pool:          sessionPool,
-				Resolver:      resolver,
-			})
+			// Recover a panic in the watchdog so a bug in the staleness
+			// gate cannot crash the process. One-shot: on recovery the
+			// watchdog exits, leaving the /healthz gate to fall back to
+			// the cycle-timestamp check the handler already performs.
+			defer recoverGoroutine("stale_watchdog", logger, m)
+			RunStaleWatchdog(ctx, &status, m, cfg.Discovery.Interval, livenessMaxStale, time.Now)
 		}()
 	}
+
+	workerDone.Add(1)
+	go func() {
+		defer workerDone.Done()
+		// Recover a panic in the discovery scheduler so one wedged
+		// cycle cannot crash the process. Per-cycle work is already
+		// panic-isolated at two finer layers — the per-device probe
+		// recover in cycle.go and the per-cycle recover added inside
+		// RunDiscoveryLoop — so reaching here means the scheduler shell
+		// itself panicked; recover, exit, and let shutdown drain.
+		defer recoverGoroutine("discovery_loop", logger, m)
+		RunDiscoveryLoop(ctx, LoopConfig{
+			Cancel:        cancel,
+			Logger:        logger,
+			WarnLimiter:   warnLimiter,
+			Cfg:           cfg,
+			M:             m,
+			WalkerMetrics: walkerMetrics,
+			Status:        &status,
+			Ready:         &ready,
+			Spoke:         spoke,
+			Otlp:          pub,
+			CycleMu:       &cycleMu,
+			Pool:          sessionPool,
+			Resolver:      resolver,
+		})
+	}()
 
 	mux.HandleFunc("/readyz", httpx.NewReadyzHandler(isReadyFn))
 
