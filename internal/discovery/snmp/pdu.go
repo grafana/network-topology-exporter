@@ -441,25 +441,43 @@ func IsCatchAll(nets []*net.IPNet) bool {
 	return false
 }
 
-// NormaliseName trims surrounding whitespace and lowercases s. Used to
-// normalise sysName / device-ID values from SNMP PDUs consistently across
-// LLDP, CDP, and the SYSTEM group walker.
-func NormaliseName(s string) string {
-	// Strip embedded control characters (NUL bytes already handled by PDUString).
-	// Some devices embed \r, \x01, or other control chars in sysName responses;
-	// leaving them in would cause device ID instability across polling cycles.
+// stripControlAndTrim removes embedded control characters (NUL bytes are
+// already handled by PDUString, but some devices embed \r, \x01, or similar
+// in sysName responses) and trims surrounding whitespace — the cleanup
+// shared by NormaliseName and NormaliseNamePreserveCase, ahead of each
+// function's own lowercase-or-not step and truncation. Kept separate from
+// truncation so each function truncates its own final form (NormaliseName
+// after lowercasing, NormaliseNamePreserveCase without).
+func stripControlAndTrim(s string) string {
 	s = strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
 			return -1
 		}
 		return r
 	}, s)
-	s = strings.ToLower(strings.TrimSpace(s))
-	// RFC 1213 defines sysName as SIZE(0..255); cap here before the string
-	// becomes a map key, graph ID, or federation payload field. The helper
-	// retreats to a UTF-8 rune boundary (RFC 3629) so we never produce
-	// invalid UTF-8.
-	return sanitize.TruncateAtRuneBoundary(s, 255)
+	return strings.TrimSpace(s)
+}
+
+// NormaliseNamePreserveCase applies stripControlAndTrim and truncates to 255
+// bytes on a UTF-8 boundary (RFC 1213 sysName is SIZE(0..255); capped here
+// before the string becomes a map key, graph ID, or federation payload
+// field). Case is preserved deliberately: this is also used for
+// discovery.Device.SysName, the case-preserving join key against
+// snmp_exporter's own sysName label — snmp_exporter passes the MIB value
+// through in the device's original case (see
+// docs/proposals/snmp-exporter-label-alignment.md §2), and PromQL has no
+// case-folding function, so a lowercased value can never match it.
+func NormaliseNamePreserveCase(s string) string {
+	return sanitize.TruncateAtRuneBoundary(stripControlAndTrim(s), 255)
+}
+
+// NormaliseName is NormaliseNamePreserveCase's cleanup plus lowercasing,
+// lowercased before truncating (not after) so a device name that changes
+// byte length under case-folding still truncates the same as it always has.
+// Used to normalise sysName / device-ID values from SNMP PDUs consistently
+// across LLDP, CDP, and the SYSTEM group walker.
+func NormaliseName(s string) string {
+	return sanitize.TruncateAtRuneBoundary(strings.ToLower(stripControlAndTrim(s)), 255)
 }
 
 // SanitisePortName caps a port-name string at 255 bytes on a rune boundary

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/grafana/network-topology-exporter/internal/discovery"
+	"github.com/grafana/network-topology-exporter/internal/limits"
 )
 
 // errInjected is a sentinel used by injection helpers to distinguish injected
@@ -104,9 +105,9 @@ func TestLoadMissingFileReturnsNil(t *testing.T) {
 func TestWriteLoadRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "snap.json")
 	in := File{
-		Devices: []discovery.Device{{ID: "dev-1", Vendor: "cisco", Site: "lab"}},
+		Devices: []discovery.Device{{ID: "dev-1", SysName: "Dev-1", Vendor: "cisco", Site: "lab"}},
 		Edges: []discovery.Edge{{
-			SrcDevice: "dev-1", SrcPort: "Gi0/1",
+			SrcDevice: "dev-1", SrcPort: "Gi0/1", SrcIfIndex: 7,
 			DstDevice: "dev-2", DstPort: "Gi0/2",
 			DiscoveryProto: "lldp",
 			Direction:      discovery.DirectionBidirectional,
@@ -132,10 +133,10 @@ func TestWriteLoadRoundTrip(t *testing.T) {
 	if out.Version != CurrentVersion {
 		t.Errorf("Version = %d, want %d", out.Version, CurrentVersion)
 	}
-	if len(out.Devices) != 1 || out.Devices[0].ID != "dev-1" {
+	if len(out.Devices) != 1 || out.Devices[0].ID != "dev-1" || out.Devices[0].SysName != "Dev-1" {
 		t.Errorf("Devices round-trip mismatch: %#v", out.Devices)
 	}
-	if len(out.Edges) != 1 || out.Edges[0].PrecedenceRank != 2 {
+	if len(out.Edges) != 1 || out.Edges[0].PrecedenceRank != 2 || out.Edges[0].SrcIfIndex != 7 {
 		t.Errorf("Edges round-trip mismatch: %#v", out.Edges)
 	}
 	if out.CredentialCache["dev-1"] != "core-v3" {
@@ -797,6 +798,54 @@ func TestLoadRejectsOversizedPortName(t *testing.T) {
 	}
 }
 
+// TestLoadRejectsNegativeIfIndex verifies that a snapshot with a negative
+// SrcIfIndex is rejected at load time — the same bound the federation
+// hub-ingest validator (internal/federation/hub_validate.go) and the default
+// single-instance Collect path (internal/metrics/topology_collector.go's
+// ifIndexLabel) enforce. A snapshot is untrusted input too (written by a
+// possibly-older or corrupted process), so the loader re-checks
+// independently rather than trusting whatever wrote the file.
+func TestLoadRejectsNegativeIfIndex(t *testing.T) {
+	path := writeSnapshotForLoad(t, File{
+		Edges: []discovery.Edge{
+			{SrcDevice: "a", SrcPort: "Gi0/1", SrcIfIndex: -1, DstDevice: "b", DstPort: "ok"},
+		},
+	})
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected validation error for negative src_if_index, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "edge[0]") {
+		t.Errorf("error should reference edge[0], got %q", msg)
+	}
+	if !strings.Contains(msg, "src_if_index") {
+		t.Errorf("error should name the src_if_index field, got %q", msg)
+	}
+}
+
+// TestLoadRejectsOverMaxIfIndex mirrors TestLoadRejectsNegativeIfIndex for
+// the upper bound, and exercises DstIfIndex rather than SrcIfIndex so both
+// fields and both bounds get direct Load-level coverage.
+func TestLoadRejectsOverMaxIfIndex(t *testing.T) {
+	path := writeSnapshotForLoad(t, File{
+		Edges: []discovery.Edge{
+			{SrcDevice: "a", SrcPort: "Gi0/1", DstDevice: "b", DstPort: "ok", DstIfIndex: limits.MaxIfIndex + 1},
+		},
+	})
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected validation error for over-limit dst_if_index, got nil")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "edge[0]") {
+		t.Errorf("error should reference edge[0], got %q", msg)
+	}
+	if !strings.Contains(msg, "dst_if_index") {
+		t.Errorf("error should name the dst_if_index field, got %q", msg)
+	}
+}
+
 // TestLoadRejectsOversizedLabelValue: a Device.Labels value over 4096 bytes
 // must be rejected with the index and labels field.
 func TestLoadRejectsOversizedLabelValue(t *testing.T) {
@@ -839,8 +888,10 @@ func TestLoadAcceptsBoundaryValues(t *testing.T) {
 			{
 				SrcDevice:      strings.Repeat("S", 256),
 				SrcPort:        strings.Repeat("P", 256),
+				SrcIfIndex:     limits.MaxIfIndex,
 				DstDevice:      strings.Repeat("D", 256),
 				DstPort:        strings.Repeat("Q", 256),
+				DstIfIndex:     limits.MaxIfIndex,
 				DiscoveryProto: discovery.DiscoveryProtocol(strings.Repeat("p", 64)),
 				LinkKind:       discovery.LinkKind(strings.Repeat("l", 64)),
 				Metadata: map[string]string{
@@ -872,6 +923,12 @@ func TestLoadAcceptsBoundaryValues(t *testing.T) {
 		{"edge metadata value +1", func(f *File) {
 			f.Edges[0].Metadata = map[string]string{"k": strings.Repeat("V", 4097)}
 		}, "metadata value"},
+		{"edge src_if_index +1 past MaxIfIndex", func(f *File) {
+			f.Edges[0].SrcIfIndex = limits.MaxIfIndex + 1
+		}, "src_if_index"},
+		{"edge dst_if_index +1 past MaxIfIndex", func(f *File) {
+			f.Edges[0].DstIfIndex = limits.MaxIfIndex + 1
+		}, "dst_if_index"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -917,9 +974,9 @@ func TestLoadAcceptsBoundaryValues(t *testing.T) {
 func TestValidateSnapshotFieldsAccumulatesMultipleErrors(t *testing.T) {
 	f := &File{
 		Devices: []discovery.Device{
-			{ID: strings.Repeat("a", 1024)},                   // device[0]: id
-			{ID: "ok", Vendor: strings.Repeat("v", 1024)},     // device[1]: vendor
-			{ID: "ok2", OSVersion: strings.Repeat("o", 1024)}, // device[2]: os_version
+			{ID: strings.Repeat("a", 1024)}, // device[0]: id
+			{ID: "ok", Vendor: strings.Repeat("v", 1024), SysName: strings.Repeat("s", 1024)}, // device[1]: vendor, sys_name
+			{ID: "ok2", OSVersion: strings.Repeat("o", 1024)},                                 // device[2]: os_version
 		},
 		Edges: []discovery.Edge{
 			{SrcDevice: "a", SrcPort: strings.Repeat("p", 1024), DstDevice: "b", DstPort: "ok"},                                                   // edge[0]: src_port
@@ -940,6 +997,7 @@ func TestValidateSnapshotFieldsAccumulatesMultipleErrors(t *testing.T) {
 	wantSubstrings := []string{
 		"device[0]", "id exceeds",
 		"device[1]", "vendor exceeds",
+		"device[1]", "sys_name exceeds",
 		"device[2]", "os_version exceeds",
 		"edge[0]", "src_port exceeds",
 		"edge[1]", "dst_port exceeds",

@@ -310,6 +310,12 @@ func TestBuildEdgesUsesPortDesc(t *testing.T) {
 	if edges[0].DstPort != "GigabitEthernet0/1" {
 		t.Errorf("DstPort = %q, want GigabitEthernet0/1", edges[0].DstPort)
 	}
+	if edges[0].SrcIfIndex != 1 {
+		t.Errorf("SrcIfIndex = %d, want 1 (local lldpLocPortNum)", edges[0].SrcIfIndex)
+	}
+	if edges[0].DstIfIndex != 0 {
+		t.Errorf("DstIfIndex = %d, want 0 (LLDP never resolves the remote side's ifIndex)", edges[0].DstIfIndex)
+	}
 }
 
 // buildEdges: entries with empty chassisID or portID are skipped.

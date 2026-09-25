@@ -13,6 +13,7 @@ import (
 
 	"github.com/grafana/network-topology-exporter/internal/discovery"
 	"github.com/grafana/network-topology-exporter/internal/graph"
+	"github.com/grafana/network-topology-exporter/internal/limits"
 	"github.com/grafana/network-topology-exporter/internal/otelx"
 )
 
@@ -131,7 +132,7 @@ func TestPushGraphTwoEdgesTwoDevices(t *testing.T) {
 	}
 	deviceIDs := make(map[string]bool)
 	for _, pt := range devicePoints {
-		deviceIDs[pt["device"]] = true
+		deviceIDs[pt["device_id"]] = true
 	}
 	for _, want := range []string{"sw-a", "sw-b"} {
 		if !deviceIDs[want] {
@@ -281,8 +282,8 @@ func TestPushGraphEdgeAttributes(t *testing.T) {
 	g := discovery.Graph{
 		Edges: []discovery.Edge{
 			{
-				SrcDevice: "sw-a", SrcPort: "Gi0/1",
-				DstDevice: "sw-b", DstPort: "Gi0/2",
+				SrcDevice: "sw-a", SrcPort: "Gi0/1", SrcIfIndex: 101,
+				DstDevice: "sw-b", DstPort: "Gi0/2", // DstIfIndex left zero: LLDP never resolves the remote side
 				DiscoveryProto: "lldp", LinkKind: "ethernet",
 				Direction:      discovery.DirectionBidirectional,
 				Confidence:     discovery.ConfidenceHigh,
@@ -304,10 +305,48 @@ func TestPushGraphEdgeAttributes(t *testing.T) {
 	for attr, want := range map[string]string{
 		"direction": "bidirectional", "confidence": "high",
 		"adjacency": "direct", "precedence_rank": "1",
+		"src_if_index": "101",
 	} {
 		if pt[attr] != want {
 			t.Errorf("attribute %q = %q, want %q", attr, pt[attr], want)
 		}
+	}
+	if _, ok := pt["dst_if_index"]; ok {
+		t.Errorf("dst_if_index present with value %q, want omitted (unresolved, DstIfIndex==0)", pt["dst_if_index"])
+	}
+}
+
+func TestPushGraphEdgeRejectsOutOfRangeIfIndex(t *testing.T) {
+	exp, reader, _ := newTestExporter("")
+
+	g := discovery.Graph{
+		Edges: []discovery.Edge{
+			{
+				SrcDevice: "sw-a", SrcPort: "Gi0/1", SrcIfIndex: -1,
+				DstDevice: "sw-b", DstPort: "Gi0/2", DstIfIndex: limits.MaxIfIndex + 1,
+				DiscoveryProto: "lldp", LinkKind: "ethernet",
+				Direction:      discovery.DirectionBidirectional,
+				Confidence:     discovery.ConfidenceHigh,
+				Adjacency:      discovery.AdjacencyDirect,
+				PrecedenceRank: 1,
+			},
+		},
+	}
+
+	if err := exp.PushGraph(context.Background(), g); err != nil {
+		t.Fatalf("PushGraph: %v", err)
+	}
+
+	edgePoints := collectMetrics(t, reader)["network_topology_edge_info"]
+	if len(edgePoints) != 1 {
+		t.Fatalf("expected 1 edge data point, got %d", len(edgePoints))
+	}
+	pt := edgePoints[0]
+	if v, ok := pt["src_if_index"]; ok {
+		t.Errorf("src_if_index present with value %q for negative SrcIfIndex, want omitted", v)
+	}
+	if v, ok := pt["dst_if_index"]; ok {
+		t.Errorf("dst_if_index present with value %q for DstIfIndex > limits.MaxIfIndex, want omitted", v)
 	}
 }
 
@@ -318,7 +357,7 @@ func TestPushGraphDeviceAttributes(t *testing.T) {
 
 	g := discovery.Graph{
 		Devices: []discovery.Device{
-			{ID: "rtr-1", Vendor: "Cisco", Model: "ASR1001", OSVersion: "16.9", Site: "dc1"},
+			{ID: "rtr-1", SysName: "Rtr-1", Vendor: "Cisco", Model: "ASR1001", OSVersion: "16.9", Site: "dc1"},
 		},
 	}
 	if err := exp.PushGraph(context.Background(), g); err != nil {
@@ -331,12 +370,41 @@ func TestPushGraphDeviceAttributes(t *testing.T) {
 	}
 	pt := devicePoints[0]
 	for attr, want := range map[string]string{
-		"device": "rtr-1", "vendor": "Cisco", "model": "ASR1001",
+		"device_id": "rtr-1", "sys_name": "Rtr-1", "vendor": "Cisco", "model": "ASR1001",
 		"os_version": "16.9", "site": "dc1",
 	} {
 		if pt[attr] != want {
 			t.Errorf("attribute %q = %q, want %q", attr, pt[attr], want)
 		}
+	}
+}
+
+// TestPushGraphDeviceAttributesDualEmitsDeprecatedDevice locks in the
+// deprecation-window dual-emit behaviour: the deprecated "device" attribute
+// must still be emitted, with the same value as "device_id", for at least
+// one full release per docs/operator/stability.md's deprecation policy.
+// Removing this without a matching CHANGELOG "Removed" entry and a major
+// version bump would silently break any consumer still reading "device".
+func TestPushGraphDeviceAttributesDualEmitsDeprecatedDevice(t *testing.T) {
+	exp, reader, _ := newTestExporter("")
+
+	g := discovery.Graph{
+		Devices: []discovery.Device{{ID: "rtr-1"}},
+	}
+	if err := exp.PushGraph(context.Background(), g); err != nil {
+		t.Fatalf("PushGraph: %v", err)
+	}
+
+	devicePoints := collectMetrics(t, reader)["network_topology_device_info"]
+	if len(devicePoints) != 1 {
+		t.Fatalf("expected 1 device data point, got %d", len(devicePoints))
+	}
+	pt := devicePoints[0]
+	if pt["device"] != "rtr-1" {
+		t.Errorf(`deprecated "device" attribute = %q, want %q`, pt["device"], "rtr-1")
+	}
+	if pt["device_id"] != "rtr-1" {
+		t.Errorf(`"device_id" attribute = %q, want %q`, pt["device_id"], "rtr-1")
 	}
 }
 
@@ -353,7 +421,7 @@ func TestPushGraphDeviceAttributesOmitEmpty(t *testing.T) {
 		t.Fatalf("expected 1 device data point, got %d", len(devicePoints))
 	}
 	pt := devicePoints[0]
-	for _, absent := range []string{"vendor", "model", "os_version", "site"} {
+	for _, absent := range []string{"sys_name", "vendor", "model", "os_version", "site"} {
 		if _, exists := pt[absent]; exists {
 			t.Errorf("attribute %q should be absent for empty device", absent)
 		}
@@ -423,7 +491,7 @@ func TestPushGraphInvalidUTF8(t *testing.T) {
 	if len(devicePoints) != 1 {
 		t.Fatalf("expected 1 device data point, got %d", len(devicePoints))
 	}
-	devID := devicePoints[0]["device"]
+	devID := devicePoints[0]["device_id"]
 	if devID == badDevice {
 		t.Errorf("device ID not sanitized: got %q", devID)
 	}

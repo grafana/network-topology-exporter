@@ -151,11 +151,12 @@ func validateSpokePayload(p SpokePayload) error {
 		}
 		seen[d.ID] = true
 		// Validate inventory string fields that flow into device_info labels
-		// (vendor, model, os_version, site). The label *names* are static so
-		// only the values need protocol-safety checks.
+		// (vendor, model, os_version, site, sys_name). The label *names* are
+		// static so only the values need protocol-safety checks.
 		for _, f := range []struct{ name, val string }{
 			{"vendor", d.Vendor}, {"model", d.Model},
 			{"os_version", d.OSVersion}, {"site", d.Site},
+			{"sys_name", d.SysName},
 		} {
 			if !utf8.ValidString(f.val) {
 				return newValidationError(rejectReasonInvalidLabelValue,
@@ -189,6 +190,12 @@ func validateSpokePayload(p SpokePayload) error {
 		if e.SrcDevice == e.DstDevice {
 			return newValidationError(rejectReasonStructuralInvalid,
 				"edge[%d]: self-edge (src_device == dst_device == %q)", i, e.SrcDevice)
+		}
+		if e.SrcIfIndex < 0 || e.SrcIfIndex > limits.MaxIfIndex ||
+			e.DstIfIndex < 0 || e.DstIfIndex > limits.MaxIfIndex {
+			return newValidationError(rejectReasonStructuralInvalid,
+				"edge[%d]: src_if_index/dst_if_index must be non-negative and at most %d (got %d/%d)",
+				i, limits.MaxIfIndex, e.SrcIfIndex, e.DstIfIndex)
 		}
 		for _, f := range []struct{ name, val string }{
 			{"src_device", e.SrcDevice}, {"src_port", e.SrcPort},

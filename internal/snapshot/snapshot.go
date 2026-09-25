@@ -71,7 +71,7 @@ const CurrentVersion = 3
 // internal/limits so the on-disk validator and the wire-format validator stay
 // in lockstep.
 const (
-	maxShortFieldBytes = 256 // vendor, model, OS version, site
+	maxShortFieldBytes = 256 // vendor, model, OS version, site, sys_name
 	maxProtoBytes      = 64  // enum-like values: discovery_proto, link_kind
 )
 
@@ -291,6 +291,9 @@ func validateSnapshotFields(f *File) error {
 		if n := len(d.Site); n > maxShortFieldBytes {
 			addErr("device[%d]: site exceeds %d bytes (%d)", i, maxShortFieldBytes, n)
 		}
+		if n := len(d.SysName); n > maxShortFieldBytes {
+			addErr("device[%d]: sys_name exceeds %d bytes (%d)", i, maxShortFieldBytes, n)
+		}
 		for k, v := range d.Labels {
 			if len(errs) >= maxValidationErrors {
 				break
@@ -318,6 +321,20 @@ func validateSnapshotFields(f *File) error {
 		}
 		if n := len(e.DstPort); n > limits.MaxPortNameBytes {
 			addErr("edge[%d]: dst_port exceeds %d bytes (%d)", i, limits.MaxPortNameBytes, n)
+		}
+		// SrcIfIndex/DstIfIndex: same non-negative + limits.MaxIfIndex bound as
+		// the federation hub-ingest validator (internal/federation/hub_validate.go)
+		// and the default single-instance Collect path
+		// (internal/metrics/topology_collector.go's ifIndexLabel). A snapshot is
+		// untrusted input too — written by a possibly-older or -corrupted
+		// process, or a disk with bit rot — so this loader re-checks the field
+		// independently rather than trusting that whatever wrote it already
+		// validated.
+		if e.SrcIfIndex < 0 || e.SrcIfIndex > limits.MaxIfIndex {
+			addErr("edge[%d]: src_if_index must be non-negative and at most %d (%d)", i, limits.MaxIfIndex, e.SrcIfIndex)
+		}
+		if e.DstIfIndex < 0 || e.DstIfIndex > limits.MaxIfIndex {
+			addErr("edge[%d]: dst_if_index must be non-negative and at most %d (%d)", i, limits.MaxIfIndex, e.DstIfIndex)
 		}
 		if n := len(e.DiscoveryProto); n > maxProtoBytes {
 			addErr("edge[%d]: discovery_proto exceeds %d bytes (%d)", i, maxProtoBytes, n)

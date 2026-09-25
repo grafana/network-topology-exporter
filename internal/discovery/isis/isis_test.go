@@ -291,6 +291,9 @@ func TestWalkPopulatesSrcPort(t *testing.T) {
 	if edges[0].SrcPort != "GigabitEthernet0/0" {
 		t.Errorf("SrcPort = %q, want GigabitEthernet0/0", edges[0].SrcPort)
 	}
+	if edges[0].SrcIfIndex != 3 {
+		t.Errorf("SrcIfIndex = %d, want 3", edges[0].SrcIfIndex)
+	}
 }
 
 // Walk: up adjacency without circuit table PDUs → SrcPort empty (graceful degradation).
@@ -312,6 +315,9 @@ func TestWalkSrcPortEmptyWhenCircuitMissing(t *testing.T) {
 	}
 	if edges[0].SrcPort != "" {
 		t.Errorf("SrcPort = %q, want empty string", edges[0].SrcPort)
+	}
+	if edges[0].SrcIfIndex != 0 {
+		t.Errorf("SrcIfIndex = %d, want 0 (circuit table missing, nothing to resolve)", edges[0].SrcIfIndex)
 	}
 	if edges[0].Metadata == nil {
 		t.Fatal("Metadata is nil, want degraded metadata")

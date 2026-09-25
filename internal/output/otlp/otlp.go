@@ -34,6 +34,7 @@ import (
 
 	"github.com/grafana/network-topology-exporter/internal/discovery"
 	"github.com/grafana/network-topology-exporter/internal/graph"
+	"github.com/grafana/network-topology-exporter/internal/limits"
 	"github.com/grafana/network-topology-exporter/internal/metrics"
 	"github.com/grafana/network-topology-exporter/internal/otelx"
 )
@@ -99,6 +100,20 @@ func edgeAttrs(edge discovery.Edge) []attribute.KeyValue {
 		attribute.String("adjacency", sanitizeUTF8(string(edge.Adjacency))),
 		attribute.String("precedence_rank", strconv.Itoa(edge.PrecedenceRank)),
 	}
+	// Omitted (not "0") when unresolved, same as vendor/model/os_version/site
+	// below: 0 is not a valid IF-MIB ifIndex, so emitting it as a string would
+	// read as real data. New in v1.1 (OTLP schema — docs/otlp-schema.md) — see
+	// docs/proposals/snmp-exporter-label-alignment.md §4. Also rejects a value
+	// outside IF-MIB's valid range (internal/limits.MaxIfIndex), mirroring the
+	// guard in internal/metrics/topology_collector.go's ifIndexLabel — this
+	// path reads the same discovery.Edge fields on the same default,
+	// single-instance code path and must not leak an invalid value verbatim.
+	if edge.SrcIfIndex > 0 && edge.SrcIfIndex <= limits.MaxIfIndex {
+		attrs = append(attrs, attribute.String("src_if_index", strconv.Itoa(edge.SrcIfIndex)))
+	}
+	if edge.DstIfIndex > 0 && edge.DstIfIndex <= limits.MaxIfIndex {
+		attrs = append(attrs, attribute.String("dst_if_index", strconv.Itoa(edge.DstIfIndex)))
+	}
 	for k, v := range edge.Metadata {
 		attrs = append(attrs, attribute.String(metadataAttrPrefix+k, sanitizeUTF8(v)))
 	}
@@ -107,7 +122,24 @@ func edgeAttrs(edge discovery.Edge) []attribute.KeyValue {
 
 // deviceAttrs builds the OTLP attribute set for one device.
 func deviceAttrs(dev discovery.Device) []attribute.KeyValue {
-	attrs := []attribute.KeyValue{attribute.String("device", sanitizeUTF8(dev.ID))}
+	// "device_id" is the aligned name — matches the Prometheus label name,
+	// see docs/proposals/snmp-exporter-label-alignment.md §5.1.
+	//
+	// "device" is DEPRECATED as of this release: it is emitted alongside
+	// "device_id" (same value) only for one release's overlap window so
+	// existing OTLP consumers built against the pre-#227 schema keep working
+	// unchanged while they migrate. Per docs/operator/stability.md's
+	// deprecation policy (minimum one full minor release of overlap), do not
+	// remove this attribute in this release — it is scheduled for removal in
+	// the next MAJOR version, per docs/otlp-schema.md's versioning policy.
+	// See CHANGELOG.md's "Deprecated" entry for this release.
+	attrs := []attribute.KeyValue{
+		attribute.String("device_id", sanitizeUTF8(dev.ID)),
+		attribute.String("device", sanitizeUTF8(dev.ID)),
+	}
+	if dev.SysName != "" {
+		attrs = append(attrs, attribute.String("sys_name", sanitizeUTF8(dev.SysName)))
+	}
 	if dev.Vendor != "" {
 		attrs = append(attrs, attribute.String("vendor", sanitizeUTF8(dev.Vendor)))
 	}

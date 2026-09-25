@@ -202,6 +202,7 @@ func buildEdges(ctx context.Context, localDevice string, ifNames map[int]string,
 		edges = append(edges, discovery.Edge{
 			SrcDevice:      localDevice,
 			SrcPort:        localPort,
+			SrcIfIndex:     k.ifIndex,
 			DstDevice:      e.deviceID,
 			DstPort:        e.devPort,
 			DiscoveryProto: discovery.DiscoveryProtocolCDP,

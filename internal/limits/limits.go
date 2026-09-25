@@ -37,3 +37,19 @@ const (
 	MaxLabelKeyBytes   = 256
 	MaxLabelValueBytes = 4096
 )
+
+// MaxIfIndex is the practical upper bound applied to a spoke-supplied
+// SrcIfIndex/DstIfIndex, in addition to the "must not be negative" check
+// every ifIndex-consuming path already enforces. IF-MIB (RFC 2863) defines
+// ifIndex as `InterfaceIndex ::= INTEGER (1..2147483647)` — the full
+// positive Integer32 range — so this uses that spec ceiling rather than a
+// tighter platform-specific guess such as 65535 (uint16): several vendors
+// (observed on Cisco IOS/IOS-XE/IOS-XR) assign ifIndex values for
+// port-channel members, sub-interfaces, and VLAN SVIs well above 16 bits, so
+// a uint16 cap would reject legitimate real-world ifIndex values and break
+// the snmp_exporter join key this project depends on (see
+// docs/proposals/snmp-exporter-label-alignment.md). 0 is reserved by this
+// codebase as the "unresolved" sentinel (ifIndexLabel in
+// internal/metrics/topology_collector.go) and is accepted even though the
+// MIB's own range starts at 1.
+const MaxIfIndex = 2147483647 // math.MaxInt32; RFC 2863 InterfaceIndex ceiling.

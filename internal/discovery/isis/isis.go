@@ -56,14 +56,14 @@ func Walk(ctx context.Context, p snmputil.Params, localDevice string, allowedNet
 		return nil, nil, fmt.Errorf("isis adjState %s: %w", p.IP, err)
 	}
 
-	var circIfNames map[string]string
+	var circIfs map[string]circuitIf
 	var degradedReasons []string
 	if stateDegraded {
 		degradedReasons = append(degradedReasons, discovery.DegradedReasonRequiredTablePartialDecode)
 	}
 	if len(states) > 0 {
 		var srcPortDegradedReason string
-		circIfNames, srcPortDegradedReason, err = walkCircuitIfNames(ctx, client)
+		circIfs, srcPortDegradedReason, err = walkCircuitIfNames(ctx, client)
 		if err != nil {
 			slog.Debug("isis: circuit ifName walk failed; SrcPort will be empty", "device", p.IP, "err", err)
 			degradedReasons = append(degradedReasons, discovery.DegradedReasonMissingSrcPortMapping)
@@ -72,7 +72,7 @@ func Walk(ctx context.Context, p snmputil.Params, localDevice string, allowedNet
 		}
 	}
 
-	edges, oos, sawIPv6, err := walkAdjIPAddrs(ctx, client, localDevice, states, circIfNames, discovery.JoinReasonCodes(degradedReasons), allowedNets)
+	edges, oos, sawIPv6, err := walkAdjIPAddrs(ctx, client, localDevice, states, circIfs, discovery.JoinReasonCodes(degradedReasons), allowedNets)
 	if err != nil {
 		return nil, nil, fmt.Errorf("isis adjIPAddr %s: %w", p.IP, err)
 	}
@@ -105,10 +105,20 @@ func walkAdjStates(ctx context.Context, client *gsnmp.GoSNMP) (map[string]int, b
 	return states, verdict.IsDegraded(), nil
 }
 
-// walkCircuitIfNames returns a map from "{sysInst}.{circIdx}" to the interface
-// name string, built by joining isisISCircIfIndex (circuit → ifIndex) with
-// ifDescr (ifIndex → interface name).
-func walkCircuitIfNames(ctx context.Context, client *gsnmp.GoSNMP) (map[string]string, string, error) {
+// circuitIf is one IS-IS circuit's resolved local interface: its name (used
+// as SrcPort) and the underlying ifIndex (used as SrcIfIndex) — always
+// resolved together from the same isisISCircIfIndex/ifDescr join, so they're
+// kept as one struct rather than two maps that would otherwise have to be
+// looked up in lockstep.
+type circuitIf struct {
+	name    string
+	ifIndex int
+}
+
+// walkCircuitIfNames returns a map from "{sysInst}.{circIdx}" to the
+// resolved local interface, built by joining isisISCircIfIndex (circuit →
+// ifIndex) with ifDescr (ifIndex → interface name).
+func walkCircuitIfNames(ctx context.Context, client *gsnmp.GoSNMP) (map[string]circuitIf, string, error) {
 	circIfIndex, stats, err := snmputil.WalkToIntMapStrict(ctx, client, "isis", oidISISCircIfIndex)
 	if err != nil {
 		return nil, "", err
@@ -121,16 +131,16 @@ func walkCircuitIfNames(ctx context.Context, client *gsnmp.GoSNMP) (map[string]s
 	if err != nil {
 		return nil, "", err
 	}
-	result := make(map[string]string, len(circIfIndex))
+	result := make(map[string]circuitIf, len(circIfIndex))
 	for key, ifIdx := range circIfIndex {
 		if name, ok := ifNames[ifIdx]; ok {
-			result[key] = name
+			result[key] = circuitIf{name: name, ifIndex: ifIdx}
 		}
 	}
 	return result, degradedReason, nil
 }
 
-func walkAdjIPAddrs(ctx context.Context, client *gsnmp.GoSNMP, localDevice string, states map[string]int, circIfNames map[string]string, degradedReason string, allowedNets []*net.IPNet) ([]discovery.Edge, []discovery.OutOfScopeNeighbour, bool, error) {
+func walkAdjIPAddrs(ctx context.Context, client *gsnmp.GoSNMP, localDevice string, states map[string]int, circIfs map[string]circuitIf, degradedReason string, allowedNets []*net.IPNet) ([]discovery.Edge, []discovery.OutOfScopeNeighbour, bool, error) {
 	pdus, err := snmputil.BulkWalk(ctx, client, oidISISAdjIPAddr)
 	if err != nil {
 		return nil, nil, false, err
@@ -185,18 +195,19 @@ func walkAdjIPAddrs(ctx context.Context, client *gsnmp.GoSNMP, localDevice strin
 		} else {
 			slog.Debug("isis: malformed adjKey, SrcPort will be empty", "adj_key", adjKey)
 		}
-		ifName := circIfNames[circKey]
+		resolved := circIfs[circKey]
 		edgeDegradedReason := degradedReason
-		if edgeDegradedReason == "" && (circKey == "" || ifName == "") {
+		if edgeDegradedReason == "" && (circKey == "" || resolved.name == "") {
 			edgeDegradedReason = discovery.DegradedReasonMissingSrcPortMapping
 		}
 		if snmputil.OutOfScope(ip, allowedNets) {
-			oos = append(oos, snmputil.NewOutOfScopeNeighbour("isis", localDevice, ifName, ip.String(), now))
+			oos = append(oos, snmputil.NewOutOfScopeNeighbour("isis", localDevice, resolved.name, ip.String(), now))
 			continue
 		}
 		edges = append(edges, discovery.Edge{
 			SrcDevice:      localDevice,
-			SrcPort:        ifName,
+			SrcPort:        resolved.name,
+			SrcIfIndex:     resolved.ifIndex,
 			DstDevice:      ip.String(),
 			DiscoveryProto: discovery.DiscoveryProtocolISIS,
 			Direction:      discovery.DirectionUnidirectional,

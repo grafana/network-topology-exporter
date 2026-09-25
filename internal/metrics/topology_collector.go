@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -9,10 +10,34 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/grafana/network-topology-exporter/internal/discovery"
+	"github.com/grafana/network-topology-exporter/internal/limits"
 	"github.com/grafana/network-topology-exporter/internal/sanitize"
 )
 
 const maxLabelLen = 128
+
+// ifIndexLabel stringifies an ifIndex for a label value, or returns "" for
+// the unresolved case (0) — mirrors how SrcPort/DstPort already degrade to
+// empty. See docs/proposals/snmp-exporter-label-alignment.md §4.
+//
+// This is the default single-instance path: discovery.Edge.SrcIfIndex/
+// DstIfIndex arrive here straight from the local LLDP/CDP/FDB/ISIS walkers
+// (internal/discovery/...), not through the federation hub-ingest
+// validator (internal/federation/hub_validate.go), which only runs for
+// pushed spoke payloads. Collect cannot return an error — it implements
+// prometheus.Collector — so a value a well-behaved walker should never
+// produce (negative, or absurdly large) is degraded to the same ""
+// "unresolved" label a real never-resolves case gets, rather than being
+// stringified verbatim into a Prometheus label or panicking the scrape.
+// limits.MaxIfIndex is the same bound the hub-ingest and snapshot-load
+// paths enforce (internal/limits), so all three ifIndex validation sites
+// agree on what "in range" means.
+func ifIndexLabel(idx int) string {
+	if idx <= 0 || idx > limits.MaxIfIndex {
+		return ""
+	}
+	return strconv.Itoa(idx)
+}
 
 func sanitizeLabel(s string) string {
 	s = strings.Map(func(r rune) rune {
@@ -53,8 +78,10 @@ func newTopologyCollector(emitBoundaryObs bool, scrapeDuration, scrapeSamples pr
 		scrapeSamples:   scrapeSamples,
 		deviceInfoDesc: prometheus.NewDesc(
 			"network_topology_device_info",
-			"One series per discovered device. Value is always 1; inventory data is in the labels.",
-			[]string{"device_id", "vendor", "model", "os_version", "site"},
+			"One series per discovered device. Value is always 1; inventory data is in the labels. "+
+				"sys_name is the case-preserving sysName, added for joining against Alloy/snmp_exporter's "+
+				"own sysName label — see docs/proposals/snmp-exporter-label-alignment.md.",
+			[]string{"device_id", "vendor", "model", "os_version", "site", "sys_name"},
 			nil,
 		),
 		deviceUptimeDesc: prometheus.NewDesc(
@@ -65,8 +92,10 @@ func newTopologyCollector(emitBoundaryObs bool, scrapeDuration, scrapeSamples pr
 		),
 		edgeInfoDesc: prometheus.NewDesc(
 			"network_topology_edge_info",
-			"One series per discovered topology edge. Value is always 1.",
-			[]string{"src_device", "src_port", "dst_device", "dst_port", "discovery_proto", "link_kind", "direction"},
+			"One series per discovered topology edge. Value is always 1. src_if_index/dst_if_index carry "+
+				"the IF-MIB ifIndex for each endpoint when the discovery protocol resolves one (empty otherwise) — "+
+				"the join key against snmp_exporter's ifIndex-keyed if_mib rows.",
+			[]string{"src_device", "src_port", "src_if_index", "dst_device", "dst_port", "dst_if_index", "discovery_proto", "link_kind", "direction"},
 			nil,
 		),
 		oosCountDesc: prometheus.NewDesc(
@@ -136,7 +165,7 @@ func (c *TopologyCollector) Collect(ch chan<- prometheus.Metric) {
 		ch <- prometheus.MustNewConstMetric(
 			c.deviceInfoDesc, prometheus.GaugeValue, 1,
 			sanitizeLabel(d.ID), sanitizeLabel(d.Vendor), sanitizeLabel(d.Model),
-			sanitizeLabel(d.OSVersion), sanitizeLabel(d.Site),
+			sanitizeLabel(d.OSVersion), sanitizeLabel(d.Site), sanitizeLabel(d.SysName),
 		)
 		ch <- prometheus.MustNewConstMetric(
 			c.deviceUptimeDesc, prometheus.GaugeValue, d.Uptime.Seconds(),
@@ -148,8 +177,8 @@ func (c *TopologyCollector) Collect(ch chan<- prometheus.Metric) {
 	for _, e := range g.Edges {
 		ch <- prometheus.MustNewConstMetric(
 			c.edgeInfoDesc, prometheus.GaugeValue, 1,
-			sanitizeLabel(e.SrcDevice), sanitizeLabel(e.SrcPort),
-			sanitizeLabel(e.DstDevice), sanitizeLabel(e.DstPort),
+			sanitizeLabel(e.SrcDevice), sanitizeLabel(e.SrcPort), ifIndexLabel(e.SrcIfIndex),
+			sanitizeLabel(e.DstDevice), sanitizeLabel(e.DstPort), ifIndexLabel(e.DstIfIndex),
 			sanitizeLabel(string(e.DiscoveryProto)), sanitizeLabel(string(e.LinkKind)), string(e.Direction),
 		)
 		samples++
@@ -162,14 +191,23 @@ func (c *TopologyCollector) Collect(ch chan<- prometheus.Metric) {
 
 	if c.emitBoundaryObs {
 		for _, n := range g.OutOfScope {
+			// Fold reporting_device/peer_a/peer_b to lowercase here only — not in
+			// discovery.OutOfScopeNeighbour or the federation wire payload, which
+			// keep whatever case the walker produced. LLDP's chassis-ID fallback
+			// path is the one hint that's genuinely un-normalised at this point;
+			// hub_merge.go's collision diagnostic needs to keep seeing that raw
+			// value, so the fold can't happen upstream. See LD-15 in
+			// docs/architecture.md.
+			reportingDevice := strings.ToLower(n.ReportingDevice)
+			neighbourHint := strings.ToLower(n.NeighbourHint)
 			peerA, peerB := canonicalPair(
-				sanitizeLabel(n.ReportingDevice),
-				sanitizeLabel(n.NeighbourHint),
+				sanitizeLabel(reportingDevice),
+				sanitizeLabel(neighbourHint),
 			)
 			ch <- prometheus.MustNewConstMetric(
 				c.boundaryObsDesc, prometheus.GaugeValue, 1,
 				peerA, peerB,
-				sanitizeLabel(n.ReportingDevice), sanitizeLabel(n.ReportingPort),
+				sanitizeLabel(reportingDevice), sanitizeLabel(n.ReportingPort),
 				sanitizeLabel(n.Proto),
 			)
 			samples++

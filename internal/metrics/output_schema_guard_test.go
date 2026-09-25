@@ -60,8 +60,8 @@ func TestEdgeInfoLabelSchemaStable(t *testing.T) {
 	})
 
 	want := []string{
-		"direction", "discovery_proto", "dst_device", "dst_port",
-		"link_kind", "src_device", "src_port",
+		"direction", "discovery_proto", "dst_device", "dst_if_index", "dst_port",
+		"link_kind", "src_device", "src_if_index", "src_port",
 	}
 	got := gatheredLabelNames(t, m, "network_topology_edge_info")
 	if strings.Join(got, ",") != strings.Join(want, ",") {
@@ -80,7 +80,7 @@ func TestDeviceInfoLabelSchemaStable(t *testing.T) {
 		}},
 	})
 
-	want := []string{"device_id", "model", "os_version", "site", "vendor"}
+	want := []string{"device_id", "model", "os_version", "site", "sys_name", "vendor"}
 	got := gatheredLabelNames(t, m, "network_topology_device_info")
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("network_topology_device_info label schema changed.\n got: %v\nwant: %v\n"+

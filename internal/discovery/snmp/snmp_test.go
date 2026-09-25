@@ -507,6 +507,9 @@ func TestWalkNormalisesSysName(t *testing.T) {
 	if dev.ID != "spine-01" {
 		t.Errorf("ID = %q, want spine-01 (lower-cased, trimmed)", dev.ID)
 	}
+	if dev.SysName != "Spine-01" {
+		t.Errorf("SysName = %q, want Spine-01 (trimmed, case preserved)", dev.SysName)
+	}
 	if dev.Vendor != "arista" {
 		t.Errorf("Vendor = %q, want arista", dev.Vendor)
 	}
@@ -919,6 +922,9 @@ func TestWalkNoSysName(t *testing.T) {
 	// ID should fall back to IP string when sysName is absent.
 	if dev.ID != ip.String() {
 		t.Errorf("ID = %q, want %s (IP fallback)", dev.ID, ip.String())
+	}
+	if dev.SysName != "" {
+		t.Errorf("SysName = %q, want empty (no sysName PDU, no fallback for this field)", dev.SysName)
 	}
 }
 
@@ -1397,6 +1403,45 @@ func TestNormaliseNameStripsControlChars(t *testing.T) {
 				t.Errorf("NormaliseName(%q) = %q, want %q", c.input, got, c.want)
 			}
 		})
+	}
+}
+
+// NormaliseNamePreserveCase: same cleanup as NormaliseName (control-char
+// strip, trim, 255-byte truncation) but case is preserved — this is the
+// specific difference the join against snmp_exporter's own sysName label
+// depends on (docs/proposals/snmp-exporter-label-alignment.md §5.2).
+func TestNormaliseNamePreserveCase(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"mixed case preserved", "Sw-Core-01", "Sw-Core-01"},
+		{"embedded CR stripped, case preserved", "Router1\rGarbage", "Router1Garbage"},
+		{"trimmed, case preserved", "  Leaf-02  ", "Leaf-02"},
+		{"already lowercase", "core-sw-01", "core-sw-01"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := NormaliseNamePreserveCase(c.input)
+			if got != c.want {
+				t.Errorf("NormaliseNamePreserveCase(%q) = %q, want %q", c.input, got, c.want)
+			}
+		})
+	}
+}
+
+// NormaliseNamePreserveCase: truncation behaves identically to NormaliseName
+// (255-byte cap, retreating to a UTF-8 rune boundary) — case is the only
+// difference between the two functions.
+func TestNormaliseNamePreserveCaseCap(t *testing.T) {
+	input := strings.Repeat("A", 256)
+	got := NormaliseNamePreserveCase(input)
+	if len(got) != 255 {
+		t.Errorf("NormaliseNamePreserveCase(256-byte ASCII string) len = %d, want 255", len(got))
+	}
+	if got != strings.Repeat("A", 255) {
+		t.Error("NormaliseNamePreserveCase lowercased or altered the truncated result")
 	}
 }
 

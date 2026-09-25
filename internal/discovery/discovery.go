@@ -104,13 +104,14 @@ func JoinReasonCodes(reasons []string) string {
 //
 // Output projections (issue #150) diverge intentionally, like Edge above:
 // Prometheus network_topology_device_info carries {device_id, vendor, model,
-// os_version, site} unconditionally (Uptime is a separate metric, Labels are not
-// emitted as series), guarded by TestDeviceInfoLabelSchemaStable; OTLP deviceAttrs
-// emits the same fields but OMITS empty ones and uses the key "device" (not
-// "device_id"); YANG maps to RFC 8345 node attributes. Do not unify the three —
-// decide per output when adding a field.
+// os_version, site, sys_name} unconditionally (Uptime is a separate metric,
+// Labels are not emitted as series), guarded by TestDeviceInfoLabelSchemaStable;
+// OTLP deviceAttrs emits the same fields (as "device_id", "sys_name", ...) but
+// OMITS empty ones; YANG maps to RFC 8345 node attributes. Do not unify the
+// three — decide per output when adding a field.
 type Device struct {
-	ID        string // sysName (normalised lowercase); fallback: management IP
+	ID        string // sysName (NormaliseName'd: lowercased); fallback: management IP
+	SysName   string // sysName, case-preserving (control-char strip + trim + truncate, no ToLower); empty if unresolved. See docs/proposals/snmp-exporter-label-alignment.md §5.2 — this is the join key against snmp_exporter's own sysName label, which snmp_exporter emits in the device's original case.
 	Vendor    string
 	Model     string
 	OSVersion string
@@ -293,6 +294,17 @@ type Edge struct {
 	SrcPort   string
 	DstDevice string
 	DstPort   string
+
+	// SrcIfIndex / DstIfIndex are the IF-MIB ifIndex for each endpoint, when the
+	// discovery protocol resolves one — 0 means unresolved (emitted as an empty
+	// label, mirroring how SrcPort/DstPort already degrade to empty). Populated
+	// today by LLDP/CDP/FDB/IS-IS (always the local/reporting side only — none of
+	// these protocols carry the remote device's own ifIndex numbering); left at
+	// zero for BGP/OSPF/MPLS-TE, which have no interface-scoped MIB row to resolve
+	// one from. See docs/proposals/snmp-exporter-label-alignment.md §4 — this is
+	// the join key against snmp_exporter's ifIndex-keyed if_mib rows.
+	SrcIfIndex int
+	DstIfIndex int
 
 	// LD-10 reconciliation labels. The metric layer maps these directly onto
 	// `network_topology_edge_info` labels.

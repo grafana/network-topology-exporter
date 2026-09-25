@@ -488,6 +488,7 @@ func buildEdges(ctx context.Context, localDevice string, entries map[string]*fdb
 		edges = append(edges, discovery.Edge{
 			SrcDevice:      localDevice,
 			SrcPort:        localPort,
+			SrcIfIndex:     ifIdx,
 			DstDevice:      rawMAC,
 			DiscoveryProto: discovery.DiscoveryProtocolFDB,
 			Direction:      discovery.DirectionUnidirectional,

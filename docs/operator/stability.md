@@ -47,9 +47,9 @@ Key metrics (summary — full details in `docs/metrics.md`):
 
 | Metric | Type | Frozen label set |
 |---|---|---|
-| `network_topology_device_info` | gauge | `device_id`, `vendor`, `model`, `os_version`, `site` |
+| `network_topology_device_info` | gauge | `device_id`, `vendor`, `model`, `os_version`, `site`, `sys_name` (added in issue #227 — **breaking**, see CHANGELOG) |
 | `network_topology_device_uptime_seconds` | gauge | `device_id` |
-| `network_topology_edge_info` | gauge | `src_device`, `src_port`, `dst_device`, `dst_port`, `discovery_proto`, `link_kind`, `direction` |
+| `network_topology_edge_info` | gauge | `src_device`, `src_port`, `src_if_index`, `dst_device`, `dst_port`, `dst_if_index`, `discovery_proto`, `link_kind`, `direction` (`src_if_index`/`dst_if_index` added in issue #227 — **breaking**, see CHANGELOG) |
 | `network_topology_change_total` | counter | `change_kind`, `discovery_proto` |
 | `network_topology_out_of_scope_neighbours_total` | gauge | (none) |
 | `network_topology_graph_stale` | gauge | (none) |
