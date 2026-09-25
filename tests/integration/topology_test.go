@@ -247,9 +247,9 @@ func TestMetricsEmittedAfterReconcile(t *testing.T) {
 	// abbreviated forms ("Gi0/1" / "Gi0/2") even though the LLDP PDUs above
 	// advertised the long forms.
 	const want = `
-# HELP network_topology_edge_info One series per discovered topology edge. Value is always 1.
+# HELP network_topology_edge_info One series per discovered topology edge. Value is always 1. src_if_index/dst_if_index carry the IF-MIB ifIndex for each endpoint when the discovery protocol resolves one (empty otherwise) — the join key against snmp_exporter's ifIndex-keyed if_mib rows.
 # TYPE network_topology_edge_info gauge
-network_topology_edge_info{direction="bidirectional",discovery_proto="lldp",dst_device="sw-b",dst_port="Gi0/2",link_kind="ethernet",src_device="sw-a",src_port="Gi0/1"} 1
+network_topology_edge_info{direction="bidirectional",discovery_proto="lldp",dst_device="sw-b",dst_if_index="",dst_port="Gi0/2",link_kind="ethernet",src_device="sw-a",src_if_index="1",src_port="Gi0/1"} 1
 `
 	if err := testutil.GatherAndCompare(m.Registry(), strings.NewReader(want), "network_topology_edge_info"); err != nil {
 		t.Errorf("edge_info mismatch: %v", err)

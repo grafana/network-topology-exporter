@@ -241,9 +241,9 @@ func TestHubSpokeEndToEnd(t *testing.T) {
 
 	// The hub should have published device and edge metrics from the pushed payload.
 	const wantDevice = `
-# HELP network_topology_device_info One series per discovered device. Value is always 1; inventory data is in the labels.
+# HELP network_topology_device_info One series per discovered device. Value is always 1; inventory data is in the labels. sys_name is the case-preserving sysName, added for joining against Alloy/snmp_exporter's own sysName label — see docs/proposals/snmp-exporter-label-alignment.md.
 # TYPE network_topology_device_info gauge
-network_topology_device_info{device_id="sw-e2e",model="catalyst",os_version="17.x",site="dc-test",vendor="cisco"} 1
+network_topology_device_info{device_id="sw-e2e",model="catalyst",os_version="17.x",site="dc-test",sys_name="",vendor="cisco"} 1
 `
 	if err := testutil.GatherAndCompare(m.Registry(), strings.NewReader(wantDevice), "network_topology_device_info"); err != nil {
 		t.Errorf("DeviceInfo mismatch: %v", err)
