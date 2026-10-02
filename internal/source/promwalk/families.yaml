@@ -1,0 +1,74 @@
+# Topology family catalog — maps labeled samples onto a canonical observation
+# (reporter, local_port, neighbor, neighbor_port, proto). Reconcile never sees
+# vendors. Adding IOS-XR YANG or Juniper BGP is a new row, not a new function.
+#
+# match.name_contains is OR. name_not_contains is AND (none may match).
+# First matching family wins. kind=neighbor accumulates on join; kind=session
+# is one sample → one edge (BGP/OSPF-class).
+
+families:
+  - id: yang_lldp
+    proto: lldp
+    evidence: gnmi_lldp
+    kind: neighbor
+    match:
+      name_contains: [lldp_interface_neighbor]
+    reporter: [device_name, source, src_device]
+    local_port: [interface_name, src_port]
+    neighbor:
+      labels: [value, system_name]
+      when_name_contains: [system_name]
+      when_name_not_contains: [description]
+      lower: true
+    neighbor_port:
+      labels: [value, port_id]
+      when_name_contains: [port_id]
+      when_name_not_contains: [description]
+      ignore_values: [INTERFACE_NAME, unknown, n/a, none]
+    join: [reporter, interface_name, neighbor_id]
+
+  - id: ieee_lldp_rem
+    proto: lldp
+    evidence: lldp_rem
+    kind: neighbor
+    match:
+      name_contains: [lldpremsysname, lldpremportid, snmp_lldp_rem_sys_name]
+      name_not_contains: [lldp_interface_neighbor]
+    reporter: [device_name, src_device, source]
+    local_port: [src_port, if_interface_name, ifDescr, interface_name, lldpRemLocalPortNum]
+    neighbor:
+      labels: [lldpRemSysName, snmp_lldpRemSysName, dst_device]
+    neighbor_port:
+      labels: [lldpRemPortId, snmp_lldpRemPortId, dst_port]
+    join: [reporter, lldpRemTimeMark, index, lldpRemLocalPortNum, lldpRemIndex]
+
+  - id: cisco_cdp
+    proto: cdp
+    evidence: cdp_cache
+    kind: neighbor
+    match:
+      name_contains: [cdpcachedeviceid, cdpcachedeviceport]
+    reporter: [device_name, src_device, source]
+    local_port: [src_port, if_interface_name, ifDescr, interface_name]
+    neighbor:
+      labels: [cdpCacheDeviceId, snmp_cdpCacheDeviceId, dst_device]
+      lower: true
+    neighbor_port:
+      labels: [cdpCacheDevicePort, snmp_cdpCacheDevicePort, dst_port]
+    join: [reporter, ifIndex, cdpCacheDeviceIndex]
+
+  - id: nokia_bgp_peer
+    proto: bgp
+    evidence: nokia_bgp_peer
+    kind: session
+    match:
+      name_contains: [tbgppeerngconnstate, bgppeerstate]
+    reporter: [device_name, src_device, source]
+    session: [tBgpPeerNgAddress, dst_device, peer]
+    remote_as: [peer_as, tBgpPeerNgPeerAS]
+    local_as: [local_as]
+    peer_group: [peer_group]
+    established:
+      value: 6
+      or_label_equals: established
+      or_label_keys: [tBgpPeerNgConnState, snmp_tBgpPeerNgConnState, bgpPeerState]

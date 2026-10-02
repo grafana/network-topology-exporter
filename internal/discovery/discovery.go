@@ -46,6 +46,24 @@ const (
 	// advertises a MAC chassis ID and a sysName, enabling FDB MAC→sysName resolution.
 	MetadataKeyPeerChassisMac = "peer_chassis_mac"
 
+	// Metadata keys for edges built from posted walks (internal/source/promwalk).
+	// Values stay on Edge.Metadata. They are not labels on
+	// network_topology_edge_info.
+	MetadataKeyInference   = "inference"
+	MetadataKeyEvidence    = "evidence"
+	MetadataKeySessionType = "session_type"
+	MetadataKeyRemoteAS    = "bgp.remote_as"
+	MetadataKeyLocalAS     = "bgp.local_as"
+	MetadataKeyPeerGroup   = "bgp.peer_group"
+
+	InferenceAlloyOTLP = "alloy_otlp"
+	SessionTypeIBGP    = "ibgp"
+	SessionTypeEBGP    = "ebgp"
+	EvidenceLLDP       = "lldp_rem"
+	EvidenceGNMILLDP   = "gnmi_lldp"
+	EvidenceCDP        = "cdp_cache"
+	EvidenceNokiaBGP   = "nokia_bgp_peer"
+
 	// DegradedReasonRequiredTablePartialDecode means a walker decoded a
 	// required MIB table but flagged the result as partial (some rows
 	// failed decode). DegradedReason* constants appear in the
