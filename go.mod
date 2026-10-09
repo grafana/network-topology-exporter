@@ -2,7 +2,7 @@ module github.com/grafana/network-topology-exporter
 
 go 1.26.0
 
-toolchain go1.26.4
+toolchain go1.26.9
 
 require (
 	github.com/gosnmp/gosnmp v1.43.2
