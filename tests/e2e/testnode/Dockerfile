@@ -1,4 +1,4 @@
-FROM alpine:3.21
+FROM alpine:3.24@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
 
 # lldpd: IEEE 802.1AB daemon with AgentX SNMP sub-agent support (-x flag).
 # net-snmp: master SNMP agent (snmpd) that lldpd registers LLDP-MIB into.
