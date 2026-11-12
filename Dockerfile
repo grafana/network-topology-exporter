@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 
 # ─── builder ────────────────────────────────────────────────────────────────
 FROM golang:1.26-alpine AS builder
@@ -24,7 +24,7 @@ RUN CGO_ENABLED=0 go build -trimpath \
     -o /out/topology-exporter ./cmd/topology-exporter
 
 # ─── runtime ────────────────────────────────────────────────────────────────
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 
 LABEL org.opencontainers.image.title="network-topology-exporter"
 LABEL org.opencontainers.image.description="Network topology discovery exporter for Prometheus / Loki / OTLP."

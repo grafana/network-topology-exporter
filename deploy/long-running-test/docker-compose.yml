@@ -12,7 +12,7 @@ services:
     restart: unless-stopped
 
   alloy:
-    image: grafana/alloy:latest
+    image: grafana/alloy:latest@sha256:8ab871206bd2d8f89277f53abffee5f452a293980788d52f85fa183a87a505a4
     container_name: long-running-alloy
     volumes:
       - ./alloy-config.alloy:/etc/alloy/config.alloy:ro
@@ -31,7 +31,7 @@ services:
     restart: unless-stopped
 
   mutator:
-    image: alpine:latest
+    image: alpine:latest@sha256:f59abe656b692d901e184be3445e084786602108599d2a51d229c0f5a48c71bf
     container_name: long-running-mutator
     volumes:
       - .:/work
